@@ -17,7 +17,8 @@ import {
   X,
   Grid,
   Sparkles,
-  HelpCircle,
+  MousePointer,
+  CheckCircle2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import type { STLResult, CSVResult, TempNode } from '../types/api';
@@ -71,6 +72,13 @@ function getTemperatureRgb(tNorm: number): [number, number, number] {
       (11 + (68 - 11) * u) / 255,
     ];
   }
+}
+
+// Convert normalized [0,1] t to CSS hex color for UI swatches
+function getTemperatureCss(tNorm: number): string {
+  const [r, g, b] = getTemperatureRgb(tNorm);
+  const h = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
 }
 
 // ── STL Mesh Component ───────────────────────────────────────────────────────
@@ -191,6 +199,21 @@ function STLMesh({
   );
 }
 
+// ── Detect if dataset is 1D (all nodes collinear along one axis) ──────────────
+function detect1D(nodes: TempNode[]): boolean {
+  if (nodes.length < 2) return false;
+  const xs = nodes.map((n) => n.x);
+  const ys = nodes.map((n) => n.y);
+  const zs = nodes.map((n) => n.z);
+  const spanX = Math.max(...xs) - Math.min(...xs);
+  const spanY = Math.max(...ys) - Math.min(...ys);
+  const spanZ = Math.max(...zs) - Math.min(...zs);
+  const maxSpan = Math.max(spanX, spanY, spanZ);
+  if (maxSpan < 1e-10) return false;
+  const secondSpan = [spanX, spanY, spanZ].sort((a, b) => b - a)[1];
+  return secondSpan < maxSpan * 0.02;
+}
+
 // ── Temperature Point Cloud Component ───────────────────────────────────────
 function TempPointCloud({
   data,
@@ -203,7 +226,7 @@ function TempPointCloud({
   onSelect: (node: TempNode | null) => void;
   onBoundsCalculated: (radius: number, dimensions: { dx: number; dy: number; dz: number }) => void;
 }) {
-  const { geometry, radius, selectedPos, dimensions } = useMemo(() => {
+  const { geometry, lineGeometry, radius, selectedPos, dimensions, is1D } = useMemo(() => {
     const xs = data.nodes.map((n) => n.x);
     const ys = data.nodes.map((n) => n.y);
     const zs = data.nodes.map((n) => n.z);
@@ -222,15 +245,18 @@ function TempPointCloud({
     const maxSpan = Math.max(spanX, spanY, spanZ, 0.001);
     const rad = Math.max(maxSpan * 0.75, 0.5);
 
-    const pos: number[] = [];
-    const colors: number[] = [];
     const tMin = data.T_min;
     const tMax = data.T_max;
     const tRange = tMax - tMin || 1;
 
+    // Sort by node id for stable connectivity line
+    const sorted = [...data.nodes].sort((a, b) => a.id - b.id);
+
+    const pos: number[] = [];
+    const colors: number[] = [];
     let selP: [number, number, number] | null = null;
 
-    for (const n of data.nodes) {
+    for (const n of sorted) {
       const px = n.x - cx;
       const py = n.y - cy;
       const pz = n.z - cz;
@@ -250,11 +276,20 @@ function TempPointCloud({
     geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geom.computeBoundingSphere();
 
+    // Line geometry for 1D spine
+    const lineGeom = new THREE.BufferGeometry();
+    lineGeom.setAttribute('position', new THREE.Float32BufferAttribute([...pos], 3));
+    const lineIndices: number[] = [];
+    for (let i = 0; i < sorted.length - 1; i++) lineIndices.push(i, i + 1);
+    lineGeom.setIndex(lineIndices);
+
     return {
       geometry: geom,
+      lineGeometry: lineGeom,
       radius: rad,
       selectedPos: selP,
       dimensions: { dx: spanX, dy: spanY, dz: spanZ },
+      is1D: detect1D(data.nodes),
     };
   }, [data, selectedId]);
 
@@ -262,10 +297,19 @@ function TempPointCloud({
     onBoundsCalculated(radius, dimensions);
   }, [radius, dimensions, onBoundsCalculated]);
 
-  const pointSize = Math.max(0.04 * radius, 0.05);
+  // Larger, proportionally-scaled points — always clearly visible
+  const pointSize = Math.max(radius * 0.045, 0.04);
 
   return (
     <group>
+      {/* Connectivity spine for ordered 1D datasets */}
+      {is1D && (
+        <lineSegments geometry={lineGeometry}>
+          <lineBasicMaterial color="#475569" transparent opacity={0.55} />
+        </lineSegments>
+      )}
+
+      {/* Main colored point cloud */}
       <points
         geometry={geometry}
         onClick={(e) => {
@@ -280,20 +324,20 @@ function TempPointCloud({
           vertexColors
           sizeAttenuation
           transparent
-          opacity={0.95}
+          opacity={0.97}
         />
       </points>
 
-      {/* Selected point highlight indicator */}
+      {/* Selected node: compact filled gold sphere + subtle outer halo */}
       {selectedPos && (
         <group position={selectedPos}>
           <mesh>
-            <sphereGeometry args={[pointSize * 0.9, 16, 16]} />
-            <meshBasicMaterial color="#FBBF24" wireframe />
+            <sphereGeometry args={[pointSize * 1.1, 12, 12]} />
+            <meshBasicMaterial color="#FBBF24" />
           </mesh>
           <mesh>
-            <ringGeometry args={[pointSize * 1.2, pointSize * 1.5, 32]} />
-            <meshBasicMaterial color="#FBBF24" side={THREE.DoubleSide} />
+            <sphereGeometry args={[pointSize * 2.0, 16, 16]} />
+            <meshBasicMaterial color="#FBBF24" transparent opacity={0.18} />
           </mesh>
         </group>
       )}
@@ -408,6 +452,103 @@ function CameraController({
   }, [radius, fitTrigger, camera, size, controlsRef]);
 
   return null;
+}
+
+// ── Professional Temperature Legend Panel (viewport overlay) ──────────────────
+function TempLegend({
+  tMin,
+  tMax,
+  selectedT,
+  nodeCount,
+}: {
+  tMin: number;
+  tMax: number;
+  selectedT: number | null;
+  nodeCount: number;
+}) {
+  const tRange = tMax - tMin || 1;
+  const midLow = tMin + tRange * 0.25;
+  const mid    = tMin + tRange * 0.5;
+  const midHigh = tMin + tRange * 0.75;
+  const markerPct = selectedT !== null ? ((selectedT - tMin) / tRange) * 100 : null;
+  const mono: React.CSSProperties = { fontFamily: 'monospace', whiteSpace: 'nowrap' };
+
+  return (
+    <div
+      style={{
+        position: 'absolute', bottom: 14, right: 14, zIndex: 10,
+        background: 'rgba(7, 12, 22, 0.90)',
+        border: '1px solid rgba(51,65,85,0.7)',
+        borderRadius: 8, padding: '10px 12px',
+        backdropFilter: 'blur(10px)', minWidth: 168,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.55)',
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Thermometer size={12} style={{ color: '#F59E0B' }} />
+        <span style={{ fontSize: 10.5, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          Temperature Field
+        </span>
+      </div>
+
+      {/* Gradient bar + marker */}
+      <div style={{ position: 'relative', marginBottom: 4 }}>
+        <div style={{
+          height: 14, borderRadius: 4,
+          background: 'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 25%, #10B981 50%, #F59E0B 75%, #EF4444 100%)',
+          boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
+        }} />
+        {markerPct !== null && (
+          <div style={{
+            position: 'absolute', top: -3,
+            left: `${Math.min(Math.max(markerPct, 1), 99)}%`,
+            transform: 'translateX(-50%)',
+            width: 3, height: 20,
+            background: '#FBBF24', borderRadius: 2,
+            boxShadow: '0 0 6px rgba(251,191,36,0.9)',
+          }} />
+        )}
+      </div>
+
+      {/* Tick labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span style={{ ...mono, fontSize: 9.5, color: '#93C5FD' }}>{tMin.toFixed(1)}</span>
+        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{midLow.toFixed(1)}</span>
+        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{mid.toFixed(1)}</span>
+        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{midHigh.toFixed(1)}</span>
+        <span style={{ ...mono, fontSize: 9.5, color: '#FCA5A5' }}>{tMax.toFixed(1)}</span>
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 9, color: '#475569', marginBottom: 6 }}>°C</div>
+
+      <div style={{ borderTop: '1px solid rgba(51,65,85,0.5)', marginBottom: 6 }} />
+
+      {/* Stats */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 10, color: '#64748B' }}>Nodes</span>
+          <span style={{ ...mono, fontSize: 10, color: '#94A3B8', fontWeight: 600 }}>{nodeCount}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 10, color: '#64748B' }}>Range</span>
+          <span style={{ ...mono, fontSize: 10, color: '#94A3B8' }}>{(tMax - tMin).toFixed(1)} °C</span>
+        </div>
+        {selectedT !== null && (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', marginTop: 2,
+            padding: '3px 6px',
+            background: 'rgba(251,191,36,0.08)', borderRadius: 4,
+            border: '1px solid rgba(251,191,36,0.25)',
+          }}>
+            <span style={{ fontSize: 10, color: '#D97706' }}>Selected</span>
+            <span style={{ ...mono, fontSize: 10, fontWeight: 700, color: '#FBBF24' }}>
+              {selectedT.toFixed(2)} °C
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Main GeometryViewer Page ─────────────────────────────────────────────────
@@ -598,6 +739,14 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   // Dimensions for Ground Grid floor placed beneath the model on XY plane
   const groundZ = -Math.max(modelDimensions.dz / 2, modelRadius * 0.5);
   const gridSize = Math.max(2, Math.ceil(modelRadius * 2.8));
+
+  // CSS hex color of the selected node, used by the inspection panel swatch
+  const selectedNodeColor = useMemo(() => {
+    if (!selectedNode || !csvResult) return null;
+    const tRange = csvResult.T_max - csvResult.T_min || 1;
+    const tNorm = (selectedNode.T - csvResult.T_min) / tRange;
+    return getTemperatureCss(tNorm);
+  }, [selectedNode, csvResult]);
 
   return (
     <div>
@@ -873,138 +1022,140 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             </div>
           )}
 
-          {/* CSV Temperature Field Card */}
+          {/* CSV Temperature Field Card – Professional Layout */}
           {csvResult && activeMode === 'csv' && (
             <div className="card">
               <div className="card-header">
-                <span className="card-title">
-                  <Thermometer size={16} /> Temperature Field
+                <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Thermometer size={16} style={{ color: '#F59E0B' }} />
+                  Temperature Field
                 </span>
-                <button
-                  className="btn btn-outline btn-sm"
-                  onClick={downloadCSV}
-                  title="Export parsed CSV dataset"
-                >
+                <button className="btn btn-outline btn-sm" onClick={downloadCSV} title="Export parsed CSV">
                   <Download size={13} /> Export
                 </button>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="form-label" style={{ margin: 0 }}>
-                    Point Count
-                  </span>
-                  <span style={{ fontWeight: 600 }}>{csvResult.node_count} nodes</span>
+
+                {/* Summary stat tiles */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(51,65,85,0.6)', borderRadius: 6, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 10, color: '#64748B', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Nodes</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: '#E2E8F0', fontFamily: 'monospace' }}>{csvResult.node_count}</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(51,65,85,0.6)', borderRadius: 6, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 10, color: '#64748B', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Range</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#E2E8F0', fontFamily: 'monospace' }}>{(csvResult.T_max - csvResult.T_min).toFixed(1)} °C</div>
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="form-label" style={{ margin: 0 }}>
-                    Temperature Range
-                  </span>
-                  <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
-                    {csvResult.T_min.toFixed(1)}°C — {csvResult.T_max.toFixed(1)}°C
-                  </span>
+                {/* T min/max bounds */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: '#93C5FD', fontFamily: 'monospace', fontWeight: 600 }}>{csvResult.T_min.toFixed(2)} °C</span>
+                  <span style={{ fontSize: 10, color: '#475569' }}>T_min → T_max</span>
+                  <span style={{ fontSize: 11, color: '#FCA5A5', fontFamily: 'monospace', fontWeight: 600 }}>{csvResult.T_max.toFixed(2)} °C</span>
                 </div>
 
-                {/* Continuous Colormap Legend */}
+                {/* Colormap bar with optional selected-node marker */}
                 <div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      marginBottom: 5,
-                    }}
-                  >
-                    <span>{csvResult.T_min.toFixed(1)}°C (Cold)</span>
-                    <span>Continuous Colormap</span>
-                    <span style={{ color: '#F87171' }}>{csvResult.T_max.toFixed(1)}°C (Hot)</span>
-                  </div>
-                  <div
-                    style={{
-                      height: 10,
-                      borderRadius: 5,
-                      background:
-                        'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 25%, #10B981 50%, #F59E0B 75%, #EF4444 100%)',
+                  <div style={{ position: 'relative', marginBottom: 4 }}>
+                    <div style={{
+                      height: 12, borderRadius: 4,
+                      background: 'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 25%, #10B981 50%, #F59E0B 75%, #EF4444 100%)',
                       boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.4)',
-                    }}
-                  />
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontSize: 10,
-                      color: 'var(--text-muted)',
-                      marginTop: 3,
-                    }}
-                  >
-                    <span>0% (Blue)</span>
-                    <span>25%</span>
-                    <span>50%</span>
-                    <span>75%</span>
-                    <span>100% (Red)</span>
+                    }} />
+                    {selectedNode && (() => {
+                      const r = csvResult.T_max - csvResult.T_min || 1;
+                      const pct = ((selectedNode.T - csvResult.T_min) / r) * 100;
+                      return (
+                        <div style={{
+                          position: 'absolute', top: -2,
+                          left: `${Math.min(Math.max(pct, 1), 99)}%`,
+                          transform: 'translateX(-50%)',
+                          width: 2, height: 16,
+                          background: '#FBBF24', borderRadius: 1,
+                          boxShadow: '0 0 4px rgba(251,191,36,0.8)',
+                        }} />
+                      );
+                    })()}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: '#475569' }}>
+                    <span>Cold</span><span>25%</span><span>50%</span><span>75%</span><span>Hot</span>
                   </div>
                 </div>
 
-                {/* Selected Node Details */}
+                {/* Node inspection panel */}
                 {selectedNode ? (
-                  <div
-                    style={{
-                      padding: 12,
-                      background: 'var(--bg-input)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: 12.5,
-                      border: '1px solid var(--border)',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: 6,
-                      }}
-                    >
-                      <span style={{ fontWeight: 600, color: 'var(--primary-blue)' }}>
-                        Node #{selectedNode.id}
-                      </span>
+                  <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(71,85,105,0.6)', borderRadius: 8, overflow: 'hidden' }}>
+                    {/* Header row */}
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '7px 10px',
+                      borderBottom: '1px solid rgba(51,65,85,0.5)',
+                      background: 'rgba(255,255,255,0.03)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{
+                          width: 9, height: 9, borderRadius: '50%',
+                          background: selectedNodeColor ?? '#FBBF24',
+                          boxShadow: `0 0 5px ${selectedNodeColor ?? '#FBBF24'}`,
+                          flexShrink: 0,
+                        }} />
+                        <span style={{ fontWeight: 700, fontSize: 11.5, color: '#CBD5E1', fontFamily: 'monospace' }}>
+                          Node #{selectedNode.id}
+                        </span>
+                        <CheckCircle2 size={11} style={{ color: '#22C55E' }} />
+                      </div>
                       <button
                         onClick={() => setSelectedNode(null)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          padding: 0,
-                        }}
+                        style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2, display: 'flex' }}
                         title="Clear selection"
                       >
                         <X size={13} />
                       </button>
                     </div>
-                    <div className="mono" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                      Coordinates (m):<br />
-                      &nbsp;&nbsp;x = {selectedNode.x.toFixed(4)}<br />
-                      &nbsp;&nbsp;y = {selectedNode.y.toFixed(4)}<br />
-                      &nbsp;&nbsp;z = {selectedNode.z.toFixed(4)}<br />
-                      Temperature:{' '}
-                      <strong style={{ color: '#F87171', fontSize: 13.5 }}>
-                        {selectedNode.T.toFixed(2)} °C
-                      </strong>
+                    {/* Coordinate rows */}
+                    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {([
+                        { label: 'X', value: selectedNode.x, color: '#EF4444' },
+                        { label: 'Y', value: selectedNode.y, color: '#10B981' },
+                        { label: 'Z', value: selectedNode.z, color: '#3B82F6' },
+                      ] as const).map(({ label, value, color }) => (
+                        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 10.5, color, fontWeight: 700, fontFamily: 'monospace', width: 14 }}>{label}</span>
+                          <span style={{ fontSize: 11.5, fontFamily: 'monospace', color: '#94A3B8' }}>{value.toFixed(4)}</span>
+                          <span style={{ fontSize: 10, color: '#475569' }}>m</span>
+                        </div>
+                      ))}
+                      {/* Temperature row */}
+                      <div style={{ borderTop: '1px solid rgba(51,65,85,0.4)', paddingTop: 5, marginTop: 2 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: 10.5, color: '#94A3B8' }}>Temperature</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <div style={{
+                              width: 8, height: 8, borderRadius: '50%',
+                              background: selectedNodeColor ?? '#FBBF24',
+                              boxShadow: `0 0 4px ${selectedNodeColor ?? '#FBBF24'}`,
+                            }} />
+                            <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700, color: '#F8FAFC' }}>
+                              {selectedNode.T.toFixed(3)}
+                            </span>
+                            <span style={{ fontSize: 10, color: '#64748B' }}>°C</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      color: 'var(--text-muted)',
-                      fontStyle: 'italic',
-                      textAlign: 'center',
-                      padding: '6px 0',
-                    }}
-                  >
-                    Click any point in the 3D viewport to inspect nodal properties
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 12px',
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px dashed rgba(51,65,85,0.5)',
+                    borderRadius: 8, color: '#64748B', fontSize: 12,
+                  }}>
+                    <MousePointer size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
+                    <span>Click any point in the viewport to inspect nodal properties</span>
                   </div>
                 )}
               </div>
@@ -1091,7 +1242,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                   height: 28,
                   padding: '0 10px',
                   fontSize: 12,
-                  opacity: activeMode === 'csv' ? 1 : 0.65,
+                  opacity: activeMode === 'csv' ? 1 : 0.55,
                   cursor: 'pointer',
                 }}
                 onClick={() => {
@@ -1104,17 +1255,17 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                     setNotice(null);
                   } else {
                     setNotice(
-                      `Temperature mode is unavailable for this STL mesh ("${stlResult?.name || 'STL model'}"). Standard ASCII STL files define boundary geometry (vertices and normals) only without scalar nodal temperatures. Per assignment requirements, temperatures are never fabricated. Click "Sample Temperature CSV" on the left or upload an analytical/ANSYS temperature CSV dataset to view the scalar colormap.`
+                      `Temperature mode is unavailable for this STL mesh ("${stlResult?.name || 'STL model'}"). Standard ASCII STL files define boundary geometry only — no scalar temperatures. Click "Sample Temperature CSV" on the left to load the colormap view.`
                     );
                   }
                 }}
                 title={
                   activeMode === 'csv'
-                    ? 'Temperature: Continuous blue → cyan → green → yellow → red scalar field'
-                    : 'Click for details on why Temperature mode is unavailable for pure STL CAD geometry'
+                    ? 'Temperature: continuous scalar field colormap'
+                    : 'Temperature mode unavailable — no CSV data loaded'
                 }
               >
-                <Thermometer size={13} /> Temperature
+                <Thermometer size={13} /> Temp
               </button>
             </div>
 
@@ -1188,14 +1339,12 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               />
             )}
 
-            {/* Adaptive Camera Controller (Maintains Z-up isometric framing on model change or Reset View) */}
             <CameraController
               radius={modelRadius}
               fitTrigger={fitTrigger}
               controlsRef={controlsRef}
             />
 
-            {/* OrbitControls revolving around centered origin (0, 0, 0) with Z as UP */}
             <OrbitControls
               ref={controlsRef}
               makeDefault
@@ -1204,17 +1353,15 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               target={[0, 0, 0]}
             />
 
-            {/* In-Scene XYZ World Axes with readable labels */}
             <WorldAxes length={Math.max(1, modelRadius * 1.15)} />
 
-            {/* Ground grid on the XY plane (normal along Z) positioned at model bottom */}
+            {/* Ground grid – XY plane at model base */}
             <gridHelper
-              args={[gridSize, 20, '#233147', '#152033']}
+              args={[gridSize, 20, '#1A2740', '#0F1C30']}
               rotation={[Math.PI / 2, 0, 0]}
               position={[0, 0, groundZ]}
             />
 
-            {/* Viewport Axis Indicator Helper (Fixed in Bottom-Right Corner) */}
             <GizmoHelper alignment="bottom-right" margin={[70, 70]}>
               <GizmoViewport
                 axisColors={['#EF4444', '#10B981', '#3B82F6']}
@@ -1222,6 +1369,16 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               />
             </GizmoHelper>
           </Canvas>
+
+          {/* Floating Temperature Legend (only when CSV is active) */}
+          {csvResult && activeMode === 'csv' && (
+            <TempLegend
+              tMin={csvResult.T_min}
+              tMax={csvResult.T_max}
+              selectedT={selectedNode?.T ?? null}
+              nodeCount={csvResult.node_count}
+            />
+          )}
 
           {/* Empty state overlay */}
           {!stlResult && !csvResult && !loading && (
