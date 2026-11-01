@@ -1,0 +1,5 @@
+n_elements,h_m,max_midpoint_error_C,convergence_rate
+10,0.1000,1.250000,baseline
+20,0.0500,0.312500,4.000
+40,0.0250,0.078125,4.000
+80,0.0125,0.019531,4.000

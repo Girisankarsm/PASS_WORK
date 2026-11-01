@@ -45,6 +45,7 @@ def package():
         ("frontend/vite.config.ts", "frontend/vite.config.ts"),
         ("frontend/src", "frontend/src"),
         ("frontend/index.html", "frontend/index.html"),
+        ("results", "results"),
     ]
     
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
