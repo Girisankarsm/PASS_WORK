@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start Workbench (Backend + Frontend)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "bash scripts/run_macos.sh"
+    },
+    {
+      "name": "Run C++ Server",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/workbench_server",
+      "args": ["8080"],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "preLaunchTask": "build-cpp"
+    },
+    {
+      "name": "Run C++ Test Suite (128 Tests)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/workbench_tests",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-cpp"
+    }
+  ]
+}

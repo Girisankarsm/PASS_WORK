@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-cpp",
+      "type": "shell",
+      "command": "cmake --build build --parallel 10",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "build-frontend",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/frontend"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "run-tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/build/workbench_tests",
+      "group": "test",
+      "dependsOn": ["build-cpp"],
+      "problemMatcher": []
+    }
+  ]
+}
