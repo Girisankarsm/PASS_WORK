@@ -1,0 +1,28 @@
+# Temperature field on a synthetic 1D rod mesh (ASCII STL unit cube)
+# Schema: node_id,x_m,y_m,z_m,temperature_C
+# Provenance: Synthetically generated to match 1D thermal FEA analytical solution:
+#   T(x) = 100 - 80x + (q/2k)*x*(1-x)  with k=10 W/(m·K), q=10000 W/m³
+# Units: x,y,z in meters; temperature in degrees Celsius
+# Generated: 2026-11-02  Author: Pass Science Works Intern (synthetic, not ANSYS export)
+node_id,x_m,y_m,z_m,temperature_C
+1,0.000,0.0,0.0,100.000
+2,0.050,0.0,0.0,96.238
+3,0.100,0.0,0.0,92.550
+4,0.150,0.0,0.0,88.938
+5,0.200,0.0,0.0,85.400
+6,0.250,0.0,0.0,81.938
+7,0.300,0.0,0.0,78.550
+8,0.350,0.0,0.0,75.238
+9,0.400,0.0,0.0,72.000
+10,0.450,0.0,0.0,68.838
+11,0.500,0.0,0.0,65.750
+12,0.550,0.0,0.0,62.738
+13,0.600,0.0,0.0,59.800
+14,0.650,0.0,0.0,56.938
+15,0.700,0.0,0.0,54.150
+16,0.750,0.0,0.0,51.438
+17,0.800,0.0,0.0,48.800
+18,0.850,0.0,0.0,46.238
+19,0.900,0.0,0.0,43.750
+20,0.950,0.0,0.0,41.338
+21,1.000,0.0,0.0,20.000
