@@ -3,6 +3,7 @@ build/
 dist/
 frontend/dist/
 *.zip
+*.bundle
 *.o
 *.a
 *.dylib
