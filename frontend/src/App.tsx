@@ -65,10 +65,31 @@ const NAV_ITEMS = [
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>(() => {
+    const raw = window.location.hash.replace(/^#\/?/, '') as Page;
+    return NAV_ITEMS.some((n) => n.id === raw) ? raw : 'dashboard';
+  });
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [sysInfo, setSysInfo] = useState<SystemInfoResponse | null>(null);
   const [backendUp, setBackendUp] = useState(false);
+
+  const navigateTo = useCallback((p: Page) => {
+    setPage(p);
+    window.location.hash = p === 'dashboard' ? '' : p;
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const raw = window.location.hash.replace(/^#\/?/, '') as Page;
+      if (NAV_ITEMS.some((n) => n.id === raw)) {
+        setPage(raw);
+      } else if (!raw) {
+        setPage('dashboard');
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const checkBackend = useCallback(async () => {
     try {
@@ -112,7 +133,7 @@ export default function App() {
               <button
                 key={id}
                 className={`nav-link ${isActive ? 'active' : ''}`}
-                onClick={() => setPage(id)}
+                onClick={() => navigateTo(id)}
               >
                 <Icon size={18} className="nav-icon" />
                 <span>{label}</span>
@@ -155,7 +176,7 @@ export default function App() {
               backendUp={backendUp}
               health={health}
               sysInfo={sysInfo}
-              onNavigate={setPage}
+              onNavigate={navigateTo}
             />
           )}
 
