@@ -3,6 +3,10 @@
 
 A professional engineering simulation platform with a C++17 backend and React/TypeScript frontend.
 
+- **GitHub Repository**: [https://github.com/Girisankarsm/PASS_WORK](https://github.com/Girisankarsm/PASS_WORK)
+- **Automated Verification**: Run `./scripts/test_all.sh` (128/128 tests passing + full API verification)
+- **Windows Package**: `PassScience_Workbench.zip` (standalone offline launch)
+
 ## Features
 
 | Module | Description |

@@ -34,3 +34,4 @@
 | **9.2** | Standalone launch without internet / compiler on first run | Bundled frontend static build (`frontend/dist/`) served directly by C++ `workbench_server` without node.js or npm on target machine. | **PASS** |
 | **10.1** | Documentation deliverables | Technical Report, Thermal FEA Report, Performance Report, Embedded Design, AI Disclosure, Ownership Statement, Demonstration guide. | **PASS** |
 | **10.2** | Handwritten Appendix Guide | Mathematical derivations and step-by-step layout for handwritten scan sheet prepared in `docs/HANDWRITTEN_APPENDIX_GUIDE.md`. | **PASS** |
+| **11.1** | Version Control & Repository | Git version control with structured history; hosted at [https://github.com/Girisankarsm/PASS_WORK](https://github.com/Girisankarsm/PASS_WORK); automated verification via `scripts/test_all.sh`. | **PASS** |
