@@ -11,13 +11,17 @@ import {
 } from 'recharts';
 import { Play, Brain, CheckCircle2, XCircle, Download } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useChartColors } from '../lib/theme';
 import type { NeuralTrainResult } from '../types/api';
+
 
 export default function NeuralNetworkLab({ backendUp }: { backendUp: boolean }) {
   const [nSteps, setNSteps] = useState(100);
   const [lr, setLr] = useState(0.1);
   const [result, setResult] = useState<NeuralTrainResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const ch = useChartColors();
+
   const [error, setError] = useState<string | null>(null);
 
   const train = useCallback(async () => {
@@ -215,31 +219,32 @@ export default function NeuralNetworkLab({ backendUp }: { backendUp: boolean }) 
               <div style={{ width: '100%', height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={lossData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={ch.grid} />
                     <XAxis
                       dataKey="step"
-                      stroke="#94A3B8"
+                      stroke={ch.axis}
                       fontSize={11}
                       tickLine={false}
-                      label={{ value: 'Training Step', position: 'insideBottom', offset: -4, fill: '#94A3B8', fontSize: 11 }}
+                      label={{ value: 'Training Step', position: 'insideBottom', offset: -4, fill: ch.axis, fontSize: 11 }}
                     />
-                    <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
+                    <YAxis stroke={ch.axis} fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: '#162238',
-                        border: '1px solid #29384F',
+                        background: ch.tooltipBg,
+                        border: `1px solid ${ch.tooltipBorder}`,
                         borderRadius: 6,
                         fontSize: 12,
-                        color: '#F1F5F9',
+                        color: 'var(--text-main)',
                       }}
                     />
                     <Line
                       type="monotone"
                       dataKey="Loss"
-                      stroke="#3B82F6"
+                      stroke={ch.primary}
                       strokeWidth={2.2}
                       dot={false}
                     />
+
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -265,26 +270,27 @@ export default function NeuralNetworkLab({ backendUp }: { backendUp: boolean }) 
               <div style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={paramsData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
-                    <XAxis dataKey="step" stroke="#94A3B8" fontSize={11} tickLine={false} />
-                    <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={ch.grid} />
+                    <XAxis dataKey="step" stroke={ch.axis} fontSize={11} tickLine={false} />
+                    <YAxis stroke={ch.axis} fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: '#162238',
-                        border: '1px solid #29384F',
+                        background: ch.tooltipBg,
+                        border: `1px solid ${ch.tooltipBorder}`,
                         borderRadius: 6,
                         fontSize: 12,
-                        color: '#F1F5F9',
+                        color: 'var(--text-main)',
                       }}
                     />
                     <Legend verticalAlign="top" height={32} iconType="circle" />
-                    <Line type="monotone" dataKey="w" stroke="#3B82F6" strokeWidth={2} dot={false} name="Weight w" />
+                    <Line type="monotone" dataKey="w" stroke={ch.primary} strokeWidth={2} dot={false} name="Weight w" />
                     <Line type="monotone" dataKey="b" stroke="#A855F7" strokeWidth={2} dot={false} name="Bias b" />
                     <Line type="monotone" dataKey="v" stroke="#22C55E" strokeWidth={2} dot={false} name="Weight v" />
                     <Line type="monotone" dataKey="c" stroke="#F59E0B" strokeWidth={2} dot={false} name="Bias c" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+
             </div>
           )}
         </div>

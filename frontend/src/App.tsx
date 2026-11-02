@@ -3,7 +3,9 @@ import {
   Home, Box, Thermometer, Zap, Cpu, Share2, CheckSquare, BookOpen
 } from 'lucide-react';
 import { api } from './lib/api';
+import { ThemeProvider, useTheme } from './lib/theme';
 import type { HealthResponse, SystemInfoResponse } from './types/api';
+
 
 // Code-splitting with lazy loading for instant initial load and small bundle
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -64,7 +66,7 @@ const NAV_ITEMS = [
   { id: 'docs' as Page,        label: 'Documentation',      icon: BookOpen },
 ];
 
-export default function App() {
+function AppShell() {
   const [page, setPage] = useState<Page>(() => {
     const raw = window.location.hash.replace(/^#\/?/, '') as Page;
     return NAV_ITEMS.some((n) => n.id === raw) ? raw : 'dashboard';
@@ -72,6 +74,7 @@ export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [sysInfo, setSysInfo] = useState<SystemInfoResponse | null>(null);
   const [backendUp, setBackendUp] = useState(false);
+  const { theme, setTheme } = useTheme();
 
   const navigateTo = useCallback((p: Page) => {
     setPage(p);
@@ -112,7 +115,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Sidebar Navigation matching reference image */}
+      {/* Sidebar Navigation */}
       <aside className="sidebar">
         {/* Branding */}
         <div className="sidebar-header">
@@ -141,6 +144,31 @@ export default function App() {
             );
           })}
         </nav>
+
+        {/* Theme Toggle */}
+        <div className="sidebar-theme-section">
+          <span className="sidebar-theme-label">Display Theme</span>
+          <div className="theme-toggle" style={{ width: '100%', justifyContent: 'stretch' }}>
+            <button
+              id="theme-btn-blue"
+              className={`theme-toggle-btn${theme === 'blue' ? ' active' : ''}`}
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={() => setTheme('blue')}
+              title="Blue Mode — dark navy engineering palette"
+            >
+              🔵 Blue
+            </button>
+            <button
+              id="theme-btn-dark"
+              className={`theme-toggle-btn${theme === 'dark' ? ' active' : ''}`}
+              style={{ flex: 1, justifyContent: 'center' }}
+              onClick={() => setTheme('dark')}
+              title="Dark Mode — true black & charcoal palette"
+            >
+              🌙 Dark
+            </button>
+          </div>
+        </div>
 
         {/* Sidebar Footer: Real Backend Status */}
         <div className="sidebar-footer">
@@ -196,3 +224,12 @@ export default function App() {
     </div>
   );
 }
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
+  );
+}
+

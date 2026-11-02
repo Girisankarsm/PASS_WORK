@@ -11,7 +11,9 @@ import {
 } from 'recharts';
 import { Play, Download, Settings, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useChartColors } from '../lib/theme';
 import type { ThermalResult, ConvergenceResult } from '../types/api';
+
 
 const DEFAULT_PARAMS = {
   n_elements: 20,
@@ -28,6 +30,8 @@ export default function ThermalAnalysis({ backendUp }: { backendUp: boolean }) {
   const [result, setResult] = useState<ThermalResult | null>(null);
   const [convergence, setConvergence] = useState<ConvergenceResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const ch = useChartColors();
+
   const [convLoading, setConvLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -212,27 +216,27 @@ export default function ThermalAnalysis({ backendUp }: { backendUp: boolean }) {
               <div style={{ width: '100%', height: 320 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
+                    <CartesianGrid strokeDasharray="3 3" stroke={ch.grid} />
                     <XAxis
                       dataKey="x"
-                      stroke="#94A3B8"
+                      stroke={ch.axis}
                       fontSize={11}
                       tickLine={false}
-                      label={{ value: 'Rod Position x (m)', position: 'insideBottom', offset: -6, fill: '#94A3B8', fontSize: 11 }}
+                      label={{ value: 'Rod Position x (m)', position: 'insideBottom', offset: -6, fill: ch.axis, fontSize: 11 }}
                     />
                     <YAxis
-                      stroke="#94A3B8"
+                      stroke={ch.axis}
                       fontSize={11}
                       tickLine={false}
-                      label={{ value: 'Temp (°C)', angle: -90, position: 'insideLeft', fill: '#94A3B8', fontSize: 11 }}
+                      label={{ value: 'Temp (°C)', angle: -90, position: 'insideLeft', fill: ch.axis, fontSize: 11 }}
                     />
                     <Tooltip
                       contentStyle={{
-                        background: '#162238',
-                        border: '1px solid #29384F',
+                        background: ch.tooltipBg,
+                        border: `1px solid ${ch.tooltipBorder}`,
                         borderRadius: 6,
                         fontSize: 12,
-                        color: '#F1F5F9',
+                        color: 'var(--text-main)',
                         boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
                       }}
                     />
@@ -240,9 +244,9 @@ export default function ThermalAnalysis({ backendUp }: { backendUp: boolean }) {
                     <Line
                       type="monotone"
                       dataKey="FEM Solution"
-                      stroke="#3B82F6"
+                      stroke={ch.primary}
                       strokeWidth={2.2}
-                      dot={{ r: 3, fill: '#3B82F6' }}
+                      dot={{ r: 3, fill: ch.primary }}
                     />
                     <Line
                       type="monotone"
@@ -252,6 +256,7 @@ export default function ThermalAnalysis({ backendUp }: { backendUp: boolean }) {
                       strokeDasharray="4 4"
                       dot={false}
                     />
+
                   </LineChart>
                 </ResponsiveContainer>
               </div>

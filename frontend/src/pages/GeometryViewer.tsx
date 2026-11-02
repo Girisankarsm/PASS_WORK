@@ -21,7 +21,9 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { useTheme } from '../lib/theme';
 import type { STLResult, CSVResult, TempNode } from '../types/api';
+
 import {
   SAMPLE_CUBE_STL,
   SAMPLE_CYLINDER_STL,
@@ -391,7 +393,7 @@ function WorldAxes({ length }: { length: number }) {
             fontSize: 10.5,
             fontWeight: 700,
             color: '#3B82F6',
-            background: 'rgba(22, 34, 56, 0.85)',
+            background: 'var(--viewport-axis-label-bg)',
             padding: '1px 5px',
             borderRadius: 3,
             border: '1px solid rgba(59, 130, 246, 0.4)',
@@ -561,6 +563,8 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const { cssVar } = useTheme();
+
 
   // Model bounding dimensions and camera fit trigger
   const [modelRadius, setModelRadius] = useState<number>(1.0);
@@ -1287,7 +1291,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               bottom: 14,
               left: 14,
               zIndex: 10,
-              background: 'rgba(22, 34, 56, 0.85)',
+              background: 'var(--viewport-hud-bg)',
               padding: '6px 12px',
               borderRadius: 'var(--radius-sm)',
               border: '1px solid var(--border)',
@@ -1311,9 +1315,10 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
           {/* 3D Canvas with Consistent Z-Up World Frame */}
           <Canvas
             camera={{ position: [3, -3, 2.5], fov: 45, up: [0, 0, 1] }}
-            style={{ background: '#0B1120', width: '100%', height: '100%' }}
+            style={{ background: cssVar('--viewport-bg'), width: '100%', height: '100%' }}
             onPointerMissed={() => setSelectedNode(null)}
           >
+
             {/* Studio 3-Point Lighting tuned for CAD contrast and curved highlight definition */}
             <ambientLight intensity={0.6} />
             <directionalLight position={[10, -10, 15]} intensity={0.9} />
@@ -1357,10 +1362,11 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
 
             {/* Ground grid – XY plane at model base */}
             <gridHelper
-              args={[gridSize, 20, '#1A2740', '#0F1C30']}
+              args={[gridSize, 20, '#1A2848', '#0F1830']}
               rotation={[Math.PI / 2, 0, 0]}
               position={[0, 0, groundZ]}
             />
+
 
             <GizmoHelper alignment="bottom-right" margin={[70, 70]}>
               <GizmoViewport

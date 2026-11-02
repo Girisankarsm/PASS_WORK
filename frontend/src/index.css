@@ -1,40 +1,100 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  /* Dark Navy and Blue Engineering Palette */
-  --bg-main: #0B1120;
+  /* ── Blue Mode (default) — Dark Navy & Blue Engineering Palette ── */
+  --bg-main: #0F172A;
   --bg-sidebar: #0F172A;
-  --bg-content: #0B1120;
-  --bg-card: #162238;
+  --bg-content: #0F172A;
+  --bg-card: #172338;
   --bg-card-elevated: #1E293B;
-  --bg-card-hover: #1c2c48;
+  --bg-card-hover: #1E2F47;
   --bg-input: #1E293B;
-  --border: #29384F;
+  --bg-table-header: #101B2E;
+  --border: #263449;
   --border-light: #334460;
-  --border-active: #3B82F6;
-  
-  --primary-blue: #3B82F6;
-  --primary-hover: #60A5FA;
-  --primary-active-bg: rgba(59, 130, 246, 0.14);
-  --primary-glow: rgba(59, 130, 246, 0.25);
-  
-  --text-main: #F1F5F9;
+  --border-active: #2563EB;
+
+  --primary-blue: #2563EB;
+  --primary-hover: #3B82F6;
+  --primary-active-bg: rgba(37, 99, 235, 0.14);
+  --primary-glow: rgba(37, 99, 235, 0.25);
+
+  --text-main: #F8FAFC;
   --text-secondary: #94A3B8;
   --text-muted: #64748B;
-  
+
   --success: #22C55E;
   --success-glow: rgba(34, 197, 94, 0.2);
   --warning: #F59E0B;
   --error: #EF4444;
-  
+
+  /* Chart-specific tokens */
+  --chart-grid: #263449;
+  --chart-axis: #94A3B8;
+  --chart-tooltip-bg: #172338;
+
+  /* Three.js / Canvas viewport */
+  --viewport-bg: #0A1020;
+  --viewport-hud-bg: rgba(7, 14, 28, 0.90);
+  --viewport-axis-label-bg: rgba(17, 30, 50, 0.85);
+
+  /* Main-wrapper gradient colours */
+  --gradient-spot: #111E33;
+
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
-  
+
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Dark Mode overrides — True Black & Charcoal ─────────────────────────── */
+[data-theme="dark"] {
+  --bg-main: #0B0B0C;
+  --bg-sidebar: #111214;
+  --bg-content: #0B0B0C;
+  --bg-card: #111214;
+  --bg-card-elevated: #18191B;
+  --bg-card-hover: #1E1F22;
+  --bg-input: #18191B;
+  --bg-table-header: #0E0F11;
+  --border: #292B30;
+  --border-light: #36383E;
+  --border-active: #3B82F6;
+
+  --primary-blue: #3B82F6;
+  --primary-hover: #60A5FA;
+  --primary-active-bg: rgba(59, 130, 246, 0.14);
+  --primary-glow: rgba(59, 130, 246, 0.25);
+
+  --text-main: #F5F5F5;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+
+  --success: #22C55E;
+  --success-glow: rgba(34, 197, 94, 0.2);
+  --warning: #F59E0B;
+  --error: #EF4444;
+
+  /* Chart-specific tokens */
+  --chart-grid: #292B30;
+  --chart-axis: #A1A1AA;
+  --chart-tooltip-bg: #18191B;
+
+  /* Three.js / Canvas viewport */
+  --viewport-bg: #080809;
+  --viewport-hud-bg: rgba(5, 5, 6, 0.92);
+  --viewport-axis-label-bg: rgba(14, 15, 17, 0.88);
+
+  /* Main-wrapper gradient colours */
+  --gradient-spot: #111213;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.55);
+  --shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.75);
 }
 
 *, *::before, *::after {
@@ -240,7 +300,7 @@ html, body {
   height: 100vh;
   overflow-y: auto;
   position: relative;
-  background: radial-gradient(circle at 50% 10%, #131e33 0%, #0B1120 70%);
+  background: radial-gradient(circle at 50% 10%, var(--gradient-spot) 0%, var(--bg-main) 70%);
 }
 
 .page-content {
@@ -706,7 +766,7 @@ html, body {
 }
 
 .data-table th {
-  background: #121C2E;
+  background: var(--bg-table-header);
   color: var(--text-secondary);
   font-weight: 600;
   padding: 10px 14px;
@@ -805,3 +865,65 @@ html, body {
     padding: 24px 16px;
   }
 }
+
+/* ── Theme Toggle Control ───────────────────────────────────────────────── */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.18s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.theme-toggle-btn.active {
+  background: var(--primary-blue);
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.theme-toggle-btn.active:hover {
+  background: var(--primary-hover);
+}
+
+/* Sidebar theme toggle wrapper */
+.sidebar-theme-section {
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.sidebar-theme-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  display: block;
+}
+
