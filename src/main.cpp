@@ -10,7 +10,18 @@
 #include <memory>
 #include <functional>
 #include <filesystem>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "crypt32.lib")
+#else
 #include <sys/utsname.h>
+#endif
 
 // Single-header libraries (fetched by CMake)
 #undef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -88,11 +99,22 @@ static void set_cors(httplib::Response& res) {
 // GET /api/health
 static void handle_health(const httplib::Request&, httplib::Response& res) {
     set_cors(res);
+#if defined(_WIN32)
+    std::string os_info = "Windows x64";
+    std::string backend_info = "C++17 / MSVC x64";
+#elif defined(__APPLE__)
     struct utsname u; uname(&u);
+    std::string os_info = std::string(u.sysname) + " " + u.release;
+    std::string backend_info = "C++17 / Apple Clang";
+#else
+    struct utsname u; uname(&u);
+    std::string os_info = std::string(u.sysname) + " " + u.release;
+    std::string backend_info = "C++17 / GCC Linux";
+#endif
     json resp = make_success({
         {"version", "1.0.0"},
-        {"backend", "C++17 / Apple Clang"},
-        {"os", std::string(u.sysname) + " " + u.release},
+        {"backend", backend_info},
+        {"os", os_info},
         {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count()}
     });
@@ -102,17 +124,44 @@ static void handle_health(const httplib::Request&, httplib::Response& res) {
 // GET /api/system-info
 static void handle_system_info(const httplib::Request&, httplib::Response& res) {
     set_cors(res);
+#if defined(_WIN32)
+    std::string os_name = "Windows";
+    std::string os_release = "x64";
+    std::string machine = "x86_64";
+    #if defined(_M_ARM64)
+    machine = "ARM64";
+    #endif
+#else
     struct utsname u; uname(&u);
+    std::string os_name = u.sysname;
+    std::string os_release = u.release;
+    std::string machine = u.machine;
+#endif
+
+#if defined(_MSC_VER)
+    std::string compiler = "MSVC " + std::to_string(_MSC_VER);
+    std::string opt = "/O2";
+#elif defined(__clang__)
+    std::string compiler = std::string("Clang ") + __clang_version__;
+    std::string opt = "-O2";
+#elif defined(__GNUC__)
+    std::string compiler = "GCC " + std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__);
+    std::string opt = "-O2";
+#else
+    std::string compiler = "C++17 Compiler";
+    std::string opt = "-O2";
+#endif
+
     json resp = make_success({
         {"cpu_logical_cores", (int)std::thread::hardware_concurrency()},
         {"cpu_physical_cores", (int)std::thread::hardware_concurrency()},
-        {"os_name", std::string(u.sysname)},
-        {"os_release", std::string(u.release)},
-        {"machine", std::string(u.machine)},
-        {"compiler", "Apple Clang 21.0.0"},
+        {"os_name", os_name},
+        {"os_release", os_release},
+        {"machine", machine},
+        {"compiler", compiler},
         {"cpp_standard", "C++17"},
-        {"optimization", "-O2"},
-        {"build_type", "RelWithDebInfo"}
+        {"optimization", opt},
+        {"build_type", "Release"}
     });
     res.set_content(resp.dump(), "application/json");
 }
@@ -488,7 +537,14 @@ static void handle_neural_train(const httplib::Request& req, httplib::Response& 
 
 int main(int argc, char* argv[]) {
     int port = 8080;
-    if (argc > 1) port = std::stoi(argv[1]);
+    if (argc > 1) {
+        try {
+            port = std::stoi(argv[1]);
+        } catch (...) {
+            std::cerr << "Invalid port argument: " << argv[1] << ", defaulting to 8080." << std::endl;
+            port = 8080;
+        }
+    }
 
     httplib::Server svr;
 
@@ -513,21 +569,68 @@ int main(int argc, char* argv[]) {
     svr.Get("/api/hardware/telemetry/:device", handle_hw_telemetry);
     svr.Post("/api/neural/train",    handle_neural_train);
 
-    // Mount static frontend bundle if present
+    // Resolve static frontend bundle relative to executable location and working directory
+    std::filesystem::path exe_dir;
+    try {
+        if (argc > 0 && argv[0]) {
+            exe_dir = std::filesystem::absolute(std::filesystem::path(argv[0])).parent_path();
+        } else {
+            exe_dir = std::filesystem::current_path();
+        }
+    } catch (...) {
+        exe_dir = std::filesystem::current_path();
+    }
+
+    std::vector<std::filesystem::path> search_paths = {
+        exe_dir / "dist",
+        exe_dir / "frontend" / "dist",
+        exe_dir / ".." / "frontend" / "dist",
+        std::filesystem::current_path() / "dist",
+        std::filesystem::current_path() / "frontend" / "dist",
+        std::filesystem::current_path() / ".." / "frontend" / "dist",
+    };
+
     std::string dist_path = "";
-    if (std::filesystem::exists("frontend/dist")) dist_path = "frontend/dist";
-    else if (std::filesystem::exists("../frontend/dist")) dist_path = "../frontend/dist";
-    else if (std::filesystem::exists("dist")) dist_path = "dist";
+    for (const auto& p : search_paths) {
+        try {
+            if (std::filesystem::exists(p) && std::filesystem::exists(p / "index.html")) {
+                dist_path = std::filesystem::canonical(p).string();
+                break;
+            }
+        } catch (...) {}
+    }
 
     if (!dist_path.empty()) {
         svr.set_mount_point("/", dist_path);
-        std::cout << "Serving static frontend bundle from: " << dist_path << std::endl;
+        std::cout << "[Server] Serving static frontend bundle from: " << dist_path << std::endl;
+
+        // Ensure root serves index.html with SPA fallback
+        std::string index_path = (std::filesystem::path(dist_path) / "index.html").string();
+        svr.Get("/", [index_path](const httplib::Request&, httplib::Response& res) {
+            std::ifstream f(index_path);
+            if (f.good()) {
+                std::stringstream ss;
+                ss << f.rdbuf();
+                res.set_content(ss.str(), "text/html");
+            } else {
+                res.status = 404;
+                res.set_content("Frontend index.html not found.", "text/plain");
+            }
+        });
+    } else {
+        std::cout << "[Server] Notice: Static frontend dist/ directory not found. API endpoints active only." << std::endl;
     }
 
     std::cout << "=== Unified Engineering Workbench Backend ===" << std::endl;
     std::cout << "Listening on http://localhost:" << port << std::endl;
-    std::cout << "C++17 | Apple Clang 21.0.0 | " << std::thread::hardware_concurrency() << " logical CPUs" << std::endl;
+    std::cout << "Threads: " << std::thread::hardware_concurrency() << " logical CPUs" << std::endl;
 
-    svr.listen("0.0.0.0", port);
+    bool ok = svr.listen("0.0.0.0", port);
+    if (!ok) {
+        std::cerr << "[CRITICAL ERROR] Failed to bind or listen on port " << port << "!" << std::endl;
+        std::cerr << "The port may already be in use by another instance or process." << std::endl;
+        std::cerr << "To specify a custom port: workbench_server <port>" << std::endl;
+        return 1;
+    }
     return 0;
 }

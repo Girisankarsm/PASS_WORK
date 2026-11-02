@@ -1,33 +1,12 @@
 @echo off
 setlocal
-echo ========================================================
-echo   Pass Science Works - Unified Engineering Workbench
-echo ========================================================
-echo Starting C++ Backend Server on http://localhost:8080...
+set "SCRIPT_DIR=%~dp0"
+set "ROOT_DIR=%SCRIPT_DIR%..\"
 
-REM Check if workbench_server.exe exists
-if exist "workbench_server.exe" (
-    start "" /b workbench_server.exe 8080
-) else if exist "build\Release\workbench_server.exe" (
-    start "" /b build\Release\workbench_server.exe 8080
-) else if exist "build\workbench_server.exe" (
-    start "" /b build\workbench_server.exe 8080
+if exist "%ROOT_DIR%Start-Workbench.bat" (
+    call "%ROOT_DIR%Start-Workbench.bat" %*
 ) else (
-    echo Error: workbench_server.exe not found!
-    echo Please run build_windows.bat first.
+    echo Error: Start-Workbench.bat not found at %ROOT_DIR%
     pause
     exit /b 1
 )
-
-REM Wait 1.5 seconds for server to start
-timeout /t 2 /nobreak >nul
-
-REM Open default browser
-echo Opening workbench in default web browser...
-start http://localhost:8080
-
-echo.
-echo Workbench is active at http://localhost:8080
-echo Close this command window or press Ctrl+C to terminate the workbench.
-echo.
-pause

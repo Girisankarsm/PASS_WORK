@@ -1,6 +1,8 @@
 # Binary & build
 build/
 dist/
+release/
+logs/
 frontend/dist/
 *.zip
 *.bundle

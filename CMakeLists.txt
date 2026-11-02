@@ -12,7 +12,7 @@ endif()
 
 # Optimization flags
 if(MSVC)
-  add_compile_options(/O2 /W3)
+  add_compile_options(/O2 /W3 /EHsc)
 else()
   add_compile_options(-O2 -Wall -Wextra -Wpedantic)
 endif()
@@ -56,8 +56,16 @@ target_include_directories(workbench_server PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
 target_link_libraries(workbench_server PRIVATE nlohmann_json::nlohmann_json)
-if(UNIX AND NOT APPLE)
+if(WIN32)
+  target_link_libraries(workbench_server PRIVATE ws2_32 crypt32)
+elseif(UNIX AND NOT APPLE)
   target_link_libraries(workbench_server PRIVATE pthread)
+endif()
+
+# Standalone Launcher target on Windows
+if(WIN32)
+  add_executable(Launch scripts/Launch.cpp)
+  target_link_libraries(Launch PRIVATE Shell32 User32 ws2_32)
 endif()
 
 # ============================================================

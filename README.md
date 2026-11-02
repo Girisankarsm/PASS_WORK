@@ -53,6 +53,30 @@ npm run dev   # → http://localhost:5173
 
 Open http://localhost:5173 in your browser. The backend must be running for live data.
 
+---
+
+### Windows Deployment & One-Click Launch
+
+The workbench includes native Windows x64 deployment automation:
+
+#### 1. One-Click Launch (Pre-packaged Release)
+- Double-click `Start-Workbench.bat`.
+- Automatically checks for port conflicts, starts the C++ backend, waits for health confirmation, and opens your default browser at `http://localhost:8080`.
+- To stop cleanly: Press any key in the launcher console or run `Stop-Workbench.bat`.
+
+#### 2. Building from Source on Windows
+```bat
+scripts\build_windows.bat
+```
+This automated batch script:
+1. Configures CMake for Visual Studio 2022 (MSVC Release x64).
+2. Builds `workbench_server.exe`, `workbench_tests.exe`, and `Launch.exe`.
+3. Executes the full CTest automated test suite.
+4. Generates the React production bundle (`npm run build`).
+5. Assembles the standalone `release/` package and creates `PassScience_Workbench_windows_x64.zip`.
+
+See [README-Windows.txt](README-Windows.txt) for detailed troubleshooting and log locations.
+
 ## Project Structure
 
 ```
