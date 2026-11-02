@@ -2,6 +2,8 @@
 build/
 dist/
 release/
+Engineering_Workbench_Submission/
+temp_screenshots/
 logs/
 frontend/dist/
 *.zip

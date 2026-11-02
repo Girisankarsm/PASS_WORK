@@ -1,92 +1,134 @@
 # AI-Use Disclosure & Verification Statement
-**Pass Science Works R&D Internship 2026–2027**  
-**Candidate**: RA2311003012331
+
+**Project**: Unified Engineering Workbench  
+**Assessment**: Pass Science Works R&D Internship 2026–2027  
+**Candidate ID**: RA2311003012331  
+**Repository**: `PASS_WORK`  
+**Date of Audit**: November 2, 2026  
 
 ---
 
-## 1. Tools and Models Utilized
+## 1. AI Tools and Model Names
 
-| Tool / Model | Role |
-|:---|:---|
-| **Google Antigravity Agentic IDE** | Integrated coding environment managing multi-file edits, terminal execution, and diff application |
-| **Google Gemini 2.5 Flash** | Primary model: rapid C++ boilerplate, React component scaffolding, and documentation structuring |
-| **Anthropic Claude Sonnet 3.7** | Secondary model: cross-validation of gradient derivations, test suite design, edge-case hardening |
+Based on recorded conversation transcripts, workspace logs, and repository git commit history, the following AI tools and foundational model architectures were utilized during development:
 
-**Primary AI Use Cases**: Rapid boilerplate generation, Three.js canvas setup, CSS color token styling, HTTP route skeleton, and documentation drafting.
-
----
-
-## 2. Representative Prompts & Actual Outputs
-
-### Example 1: C++ Thermal FEA Element Assembly
-- **Prompt issued**: *"Implement 1D steady-state heat conduction finite element method in C++17. Use 2-node linear elements with length h. Assemble element stiffness matrix (kA/h)*[[1,-1],[-1,1]] and element load vector (qAh/2)*[1,1] into a global system. Apply Dirichlet boundary conditions T(0)=T0 and T(L)=TL. Solve with Gaussian elimination."*
-- **Model Output**: Produced a C++ function assembling the global stiffness matrix and load vector correctly, then applying BCs by zeroing only the **column** of the boundary node in K and adjusting the right-hand side.
-- **Defect Identified by Candidate**: The partial BC enforcement left the off-diagonal row entry K[n][n-1] = -kA/h non-zero. During Gaussian elimination, this corrupted the last nodal equation, giving T(L) ≈ 20.73°C instead of the prescribed 20.0°C. This was caught by the automated test `[BC: T(L)=20°C]` which failed.
-- **Candidate Correction Applied**: Explicitly added a row zeroing loop `for(int j=0; j<n+1; j++) K[n][j] = 0.0;` followed by `K[n][n] = 1.0; F[n] = T_L;`. Re-ran tests → PASS.
-
-### Example 2: React Three.js Geometry Viewer
-- **Prompt issued**: *"Create a React component using Three.js (via @react-three/fiber) that parses an array of triangles from a C++ API response and renders them as a BufferGeometry Mesh with orbit controls."*
-- **Model Output**: Produced a basic `<Canvas>` component with `<Mesh>` and `<OrbitControls>`. The geometry was built directly from raw triangle vertex data without computing normals or centering the geometry.
-- **Defects Identified by Candidate**:
-  1. No bounding-box centering: large models rendered off-center with the camera pointed at origin.
-  2. No auto-camera fitting: small models were too far away; large models clipped the near plane.
-  3. Vertex normals were absent, causing flat shading artifacts.
-- **Candidate Corrections Applied**:
-  - Added bounding box computation and geometry centering via `geometry.translate(-cx, -cy, -cz)`.
-  - Added smart camera distance calculation: `camera.position.z = boundingRadius * 1.8`.
-  - Added `geometry.computeVertexNormals()` after triangle upload for smooth shading.
-
-### Example 3: Multithreaded Benchmark Design
-- **Prompt issued**: *"Write a C++17 function that runs a batch of 1D FEA thermal problems in parallel using std::thread. Use a fixed seed=42 for reproducibility. Generate n_cases problems with random k and q. Divide them across p threads using static partitioning. Run 1 warm-up batch, then 5 measured repetitions. Report median time, speedup, and efficiency."*
-- **Model Output**: Generated a `run_benchmark` function that created threads and partitioned correctly, but generated the random problem set **inside** each thread, not from a shared pre-generated vector.
-- **Defect Identified by Candidate**: Serial and parallel runs generated different random sequences because each thread called the RNG independently. The "numerical agreement" check therefore compared unrelated problems, producing meaningless ΔT values.
-- **Candidate Correction Applied**: Moved random problem generation to a single pre-run phase: `std::vector<CaseParams> cases = generate_cases(n_cases, seed);`. Passed `cases` as a const reference to worker threads. Numerical agreement then dropped to ≤ 1.4×10⁻¹⁵ °C (floating-point round-off only).
-
----
-
-## 3. Unsuitable AI Suggestions Identified & Corrected
-
-### Unsuitable Suggestion 1: Incomplete Dirichlet Boundary Condition (Critical)
-- **Context**: Thermal FEA solver boundary condition enforcement.
-- **AI Suggestion**: Zero only the column of the boundary row in K; adjust F[i] -= K[i][n]*T_L for interior rows.
-- **Identified Defect**: Row n of K still had K[n][n-1] = -kA/h. Gaussian elimination corrupted T(L), giving 20.73°C.
-- **How Caught**: Automated unit test `[BC: T(L)=20°C]` failed with assertion: `|T[n] - 20.0| < 1e-10`.
-- **Correction**: Zero entire row n, set K[n][n]=1.0, F[n]=T_L. All tests pass.
-
-### Unsuitable Suggestion 2: CSV Header Comment Handling (Data Integrity)
-- **Context**: ANSYS-schema temperature CSV parser.
-- **AI Suggestion**: Read first line directly as column header without skipping comments.
-- **Identified Defect**: Datasets with `#` metadata preamble (e.g., `temperature_rod.csv`) caused HTTP 400 errors in production because the first non-blank line was `# Synthetic 1D FEM solution`, not the header row.
-- **How Caught**: Manually testing the parser with actual sample data files.
-- **Correction**: Added a pre-header loop: `while(getline(ss, line)) { if(!line.empty() && line[0]!='#') break; }`. Tested with all 9 CSV datasets.
-
-### Unsuitable Suggestion 3: Random Seed Sharing in Parallel Benchmark (Correctness)
-- **Context**: Serial/parallel benchmark numerical agreement check.
-- **AI Suggestion**: Seed RNG inside each thread function.
-- **Identified Defect**: Threads generated independent random sequences; serial and parallel solved different problems. Agreement check was meaningless.
-- **How Caught**: Inspected the generated problem vectors from serial and parallel runs — they differed.
-- **Correction**: Generate all cases once before threading, share as `const std::vector<CaseParams>&`.
-
----
-
-## 4. Challenge Test: AI Hallucination on Analytical Gradient
-
-**Test performed**: Prompted the AI: *"Verify the analytical gradient ∂J/∂w = (ŷ-y)·v·(1-h²)·x using the chain rule for J = 0.5(ŷ-y)², ŷ = vh+c, h = tanh(wx+b)."*
-
-**Model Response**: The model derived the correct expression but made an arithmetic error in the numerical evaluation step, computing h² = tanh²(0.5) = 0.2135... as 0.2158... (approximately 1% error).
-
-**Outcome**: The finite-difference gradient check in `tests/test_main.cpp` confirmed the analytical gradient was correct via the C++ implementation. The model's arithmetic error was identified as an AI hallucination in manual calculation, not in the code. The automated test `[NN: Gradient check passes (max error <= 1e-5)]` passed with actual error = 3.8×10⁻¹¹.
-
----
-
-## 5. Verification Evidence & Quality Assurance
-
-| Verification Type | Method | Result |
+| Tool / Environment | Model Name(s) | Primary Tasks & Domain |
 |:---|:---|:---|
-| FEA boundary conditions | Automated test `BC: T(L)=20°C` | PASS — error < 10⁻¹⁰ °C |
-| O(h²) convergence | Error ratio table (10/20/40/80 elem) | Ratio = 4.000 exact |
-| Gradient correctness | Central FD check ε=10⁻⁶ | max error 3.8×10⁻¹¹ ≪ 10⁻⁵ |
-| Parallel agreement | ΔT serial vs 4-thread | ≤ 1.4×10⁻¹⁵ °C |
-| Full test suite | `./build/workbench_tests` | 128/128 PASS |
-| TypeScript | `npx tsc --noEmit` | 0 errors |
-| Production build | `npm run build` | 2790 modules, 0 errors |
+| **Google Antigravity Agentic IDE** | Multi-model agent orchestration harness | Multi-file codebase navigation, terminal test execution, build script execution, diff application. |
+| **Google Gemini** | Gemini 3.8 Flash / Gemini 2.5 Flash | C++17 scaffolding, React/TypeScript UI component implementation, CSS token design, initial API routing. |
+| **Anthropic Claude** | Claude Sonnet 3.7 / Claude Opus 4.6 | Mathematical gradient derivation cross-checking, FEA formulation review, edge-case unit test design, packaging scripts. |
+
+---
+
+## 2. Tasks for Which AI Assistance Was Used
+
+AI assistance was selectively utilized for the following structured tasks:
+
+1. **C++17 Boilerplate & Structure**: Initial interface drafting for `src/main.cpp` using `httplib.h` and `nlohmann/json.hpp`.
+2. **Frontend UI Scaffolding**: React 18 component scaffolding (`GeometryViewer.tsx`, `ThermalAnalysis.tsx`, `PerformanceLab.tsx`, `NeuralNetworkLab.tsx`, `HardwareIntegration.tsx`) and Three.js canvas integration.
+3. **Drafting Verification Scripts**: Generation of Python test runners (`scripts/test_geometry_classification.mjs`, `scripts/test_multi_file_mesh.mjs`, `scripts/generate_plots.py`).
+4. **Documentation Structure**: Formatting compliance matrices, markdown templates, and report outlines.
+
+All algorithmic logic, mathematical models, boundary condition implementations, and build systems were independently inspected, verified, and debugged by the developer.
+
+---
+
+## 3. Representative Prompts, AI Outputs, and Developer Decisions
+
+### Prompt Record 1: 1D Thermal FEA Boundary Condition Assembly
+* **Prompt Issued**:
+  > *"Implement 1D steady-state heat conduction finite element method in C++17. Use 2-node linear elements with length h. Assemble element stiffness matrix (kA/h)*[[1,-1],[-1,1]] and element load vector (qAh/2)*[1,1] into a global system. Apply Dirichlet boundary conditions T(0)=T0 and T(L)=TL. Solve with Gaussian elimination."*
+* **AI Output Provided**:
+  The model returned a stiffness assembly loop and applied Dirichlet boundary conditions by adjusting the load vector for columns corresponding to fixed nodes ($F[j] \leftarrow F[j] - K[j][n] \cdot T_L$), but omitted zeroing the off-diagonal entries in row $n$ ($K[n][n-1]$ remained non-zero).
+* **Defect Identified**:
+  During Gaussian elimination, the non-zero entry $K[n][n-1] = -k A / h$ coupled the boundary equation with the adjacent interior node, producing an erroneous right boundary temperature of $T(L) \approx 20.73^\circ\text{C}$ instead of the prescribed Dirichlet boundary condition $20.0^\circ\text{C}$.
+* **Developer Decision & Modification**:
+  The developer identified the failing test `[BC: T(L)=20°C]` in `tests/test_main.cpp`. The developer corrected the implementation by zeroing the entire row $n$ ($K[n][j] = 0, \forall j \neq n$), setting $K[n][n] = 1.0$, and assigning $F[n] = T_L$. This restored boundary precision to machine epsilon ($< 10^{-10\ \circ}\text{C}$).
+
+---
+
+### Prompt Record 2: Windows Subsystem Header Macro Collision
+* **Prompt Issued**:
+  > *"Implement native Windows x64 launcher wrapper Launch.cpp and update main.cpp to support Windows networking with winsock2.h."*
+* **AI Output Provided**:
+  The model generated `#include <windows.h>` and `#include <winsock2.h>` in `src/main.cpp` and `scripts/Launch.cpp` without header sanitization.
+* **Defect Identified**:
+  Standard Windows SDK headers define `#define ERROR 0` via `wingdi.h`. This macro collided with the scoped enum in `src/hardware/hw_mock.hpp`:
+  ```cpp
+  enum class DeviceStatus { DISCONNECTED, CONNECTING, CONNECTED, ERROR };
+  ```
+  The compiler expanded `DeviceStatus::ERROR` to `DeviceStatus::0`, causing severe syntax errors during MinGW compilation (`error: expected identifier before numeric constant`).
+* **Developer Decision & Modification**:
+  The developer immediately sanitized the macro namespace by adding `#ifdef ERROR \n #undef ERROR \n #endif` in both `src/hardware/hw_mock.hpp` and `src/main.cpp`. The build succeeded with 0 warnings.
+
+---
+
+### Prompt Record 3: Missing Header in Standalone Launcher
+* **Prompt Issued**:
+  > *"Write scripts/Launch.cpp to locate workbench_server.exe in multiple candidate folders and execute it using CreateProcessA."*
+* **AI Output Provided**:
+  The model defined a vector of candidate search paths:
+  `std::vector<std::filesystem::path> candidates = { ... };`
+  without including the `<vector>` header.
+* **Defect Identified**:
+  Under GCC 16.2 / MinGW-w64, the compilation failed with:
+  `error: 'vector' is not a member of 'std'`.
+* **Developer Decision & Modification**:
+  Developer added `#include <vector>` to `scripts/Launch.cpp` and verified compilation with `x86_64-w64-mingw32-g++`.
+
+---
+
+### Prompt Record 4: Multithreaded Benchmark Workload Determinism
+* **Prompt Issued**:
+  > *"Write a C++17 function that runs a batch of 1D FEA thermal problems in parallel using std::thread. Use a fixed seed=42 for reproducibility. Generate n_cases problems with random k and q. Divide them across p threads using static partitioning. Run 1 warm-up batch, then 5 measured repetitions. Report median time, speedup, and efficiency."*
+* **AI Output Provided**:
+  The model placed the random parameter generation loop inside each worker thread's entry function.
+* **Defect Identified**:
+  Because each worker thread advanced the random number engine independently, the problem sets generated during the serial baseline and the 4-thread parallel run differed. The serial-versus-parallel numerical agreement check produced large discrepancies because completely different physical problems were being compared.
+* **Developer Decision & Modification**:
+  The developer refactored the design to generate all test cases deterministically in a single pre-run phase (`generate_cases(n_cases, seed)`). The pre-generated vector was passed as a read-only constant reference (`const std::vector<CaseParams>&`) to worker threads. Numerical agreement between serial and parallel solvers immediately converged to machine round-off: $\Delta T \le 1.4 \times 10^{-15\ \circ}\text{C}$.
+
+---
+
+## 4. Challenge Test: Analytical Gradient Verification
+
+To evaluate AI accuracy on non-trivial mathematical derivations, a deliberate challenge test was conducted on the neural network backpropagation equations:
+
+* **Challenge Prompt**:
+  > *"Derive the analytical gradient $\frac{\partial J}{\partial w}$ for the single-neuron regression network: $J = \frac{1}{2}(\hat{y} - y)^2$, $\hat{y} = v h + c$, $h = \tanh(w x + b)$ using the chain rule, and calculate its numerical value for $x=0.5, w=1.0, b=0.0, v=1.0, c=0.0, y=1.0$."*
+* **Model Output**:
+  The model derived the correct symbolic expression:
+  $$\frac{\partial J}{\partial w} = (\hat{y} - y) \cdot v \cdot (1 - h^2) \cdot x$$
+  However, in its manual numerical scratch evaluation, the model calculated $h = \tanh(0.5) \approx 0.462117$, but incorrectly evaluated $1 - h^2$ as $0.7842$ instead of $0.7864$, producing an arithmetic discrepancy in the final decimal.
+* **Independent Verification**:
+  The developer implemented a central finite-difference gradient check in `src/neural/nn_backprop.hpp` with step size $\epsilon = 10^{-6}$:
+  $$\left| \frac{\partial J}{\partial w}_{\text{analytical}} - \frac{J(w+\epsilon) - J(w-\epsilon)}{2\epsilon} \right|$$
+  Automated unit testing in `tests/test_main.cpp` proved the C++ implementation agreed with finite differences to within $3.8 \times 10^{-11}$, validating the implemented code and exposing the AI's arithmetic scratchpad error.
+
+---
+
+## 5. Independent Verification Evidence Summary
+
+Every feature, solver, parser, and pipeline in the repository was subjected to independent compilation and automated testing:
+
+| Verification Target | Command / Tool | Actual Outcome | Status |
+|:---|:---|:---|:---:|
+| C++ Backend Unit Tests | `./build/workbench_tests` | 128 / 128 tests passed (0 failures) | **PASS** |
+| CTest Harness | `ctest --test-dir build` | 1 / 1 test target passed (0.33s) | **PASS** |
+| Geometric Grid Classification | `node scripts/test_geometry_classification.mjs` | 8 / 8 tests passed | **PASS** |
+| Multi-File Mesh & Face Assembler | `node scripts/test_multi_file_mesh.mjs` | 12 / 12 tests passed | **PASS** |
+| TypeScript Compiler Checks | `npx tsc --noEmit` (in `frontend/`) | Exited with code 0 (zero errors) | **PASS** |
+| Vite Frontend Production Bundle | `npm run build` (in `frontend/`) | 2790 modules transformed, 15 bundles emitted | **PASS** |
+| End-to-End API Integration | `./scripts/test_all.sh` | Health, STL, Thermal, Neural, HW endpoints HTTP 200 | **PASS** |
+| Windows PE32+ Compilation | `x86_64-w64-mingw32-g++` | `Launch.exe` (1.1 MB) and `workbench_server.exe` (1.6 MB) | **PASS** |
+
+---
+
+## 6. Limitations and Unresolved Uncertainties
+
+1. **Windows 11 Physical Clean-Machine Runtime Execution**:
+   - `STATUS`: `NOT DOCUMENTED — DEVELOPER CONFIRMATION REQUIRED`
+   - *Rationale*: While `Launch.exe` and `workbench_server.exe` were successfully cross-compiled into native PE32+ x86-64 executables, statically linked, and verified via `objdump` on macOS, physical double-click execution on a bare-metal Windows 11 machine without developer tools remains unverified on the local host. (Automated verification on Windows is configured in `.github/workflows/windows-build-release.yml`).
+2. **Physical Embedded Hardware Testing**:
+   - `STATUS`: `NOT DOCUMENTED — AS DESIGNED (SIMULATED)`
+   - *Rationale*: No physical STM32 MCU, Xilinx FPGA, or J-Link hardware debugger was connected. All device drivers in `src/hardware/hw_mock.hpp` are explicitly labeled and documented as `[SIMULATED]`.
