@@ -7,9 +7,9 @@ const DEVICES = ['mcu', 'fpga', 'jtag'] as const;
 type DeviceKey = typeof DEVICES[number];
 
 const DEVICE_LABELS: Record<DeviceKey, { name: string; type: string; color: string }> = {
-  mcu: { name: 'STM32F446RE Nucleo', type: 'ARM Cortex-M4 Microcontroller', color: '#2583FF' },
+  mcu: { name: 'STM32F446RE Nucleo', type: 'ARM Cortex-M4 Microcontroller', color: '#3B82F6' },
   fpga: { name: 'Xilinx Artix-7', type: 'XC7A35T FPGA Target', color: '#A855F7' },
-  jtag: { name: 'Segger J-Link EDU', type: 'SWD / JTAG Debug Probe', color: '#F97316' },
+  jtag: { name: 'Segger J-Link EDU', type: 'SWD / JTAG Debug Probe', color: '#F59E0B' },
 };
 
 export default function HardwareIntegration({ backendUp }: { backendUp: boolean }) {

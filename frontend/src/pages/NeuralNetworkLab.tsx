@@ -215,28 +215,29 @@ export default function NeuralNetworkLab({ backendUp }: { backendUp: boolean }) 
               <div style={{ width: '100%', height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={lossData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#233147" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
                     <XAxis
                       dataKey="step"
-                      stroke="#64748B"
+                      stroke="#94A3B8"
                       fontSize={11}
                       tickLine={false}
-                      label={{ value: 'Training Step', position: 'insideBottom', offset: -4, fill: '#64748B', fontSize: 11 }}
+                      label={{ value: 'Training Step', position: 'insideBottom', offset: -4, fill: '#94A3B8', fontSize: 11 }}
                     />
-                    <YAxis stroke="#64748B" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: '#152033',
-                        border: '1px solid #233147',
-                        borderRadius: 8,
+                        background: '#162238',
+                        border: '1px solid #29384F',
+                        borderRadius: 6,
                         fontSize: 12,
+                        color: '#F1F5F9',
                       }}
                     />
                     <Line
                       type="monotone"
                       dataKey="Loss"
-                      stroke="#2583FF"
-                      strokeWidth={2.5}
+                      stroke="#3B82F6"
+                      strokeWidth={2.2}
                       dot={false}
                     />
                   </LineChart>
@@ -264,15 +265,16 @@ export default function NeuralNetworkLab({ backendUp }: { backendUp: boolean }) 
               <div style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={paramsData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#233147" />
-                    <XAxis dataKey="step" stroke="#64748B" fontSize={11} tickLine={false} />
-                    <YAxis stroke="#64748B" fontSize={11} tickLine={false} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
+                    <XAxis dataKey="step" stroke="#94A3B8" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        background: '#152033',
-                        border: '1px solid #233147',
-                        borderRadius: 8,
+                        background: '#162238',
+                        border: '1px solid #29384F',
+                        borderRadius: 6,
                         fontSize: 12,
+                        color: '#F1F5F9',
                       }}
                     />
                     <Legend verticalAlign="top" height={32} iconType="circle" />

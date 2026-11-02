@@ -30,7 +30,7 @@ interface Props {
 }
 
 // Custom Isometric 3D Cube Icon matching the reference image exactly
-function IsometricCubeIcon({ size = 36, color = '#2583FF' }: { size?: number; color?: string }) {
+function IsometricCubeIcon({ size = 36, color = '#3B82F6' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path
@@ -66,7 +66,7 @@ function IsometricCubeIcon({ size = 36, color = '#2583FF' }: { size?: number; co
 }
 
 // Custom Neural Network Graph Icon
-function NeuralNodesIcon({ size = 32, color = '#2583FF' }: { size?: number; color?: string }) {
+function NeuralNodesIcon({ size = 32, color = '#3B82F6' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
       <circle cx="16" cy="7" r="3" stroke={color} strokeWidth="2.2" />
@@ -96,7 +96,7 @@ const SIX_MODULES: ModuleCard[] = [
     title: 'Geometry Viewer',
     badge: '3D CAD',
     subtitle: 'Inspect ASCII STL meshes and temperature CSV point clouds with Z-up coordinates.',
-    renderIcon: () => <IsometricCubeIcon size={34} color="#2583FF" />,
+    renderIcon: () => <IsometricCubeIcon size={34} color="#3B82F6" />,
   },
   {
     id: 'thermal',
@@ -128,7 +128,7 @@ const SIX_MODULES: ModuleCard[] = [
     title: 'Automated Tests',
     badge: '128 / 128 PASS',
     subtitle: 'Run and verify the automated C++ test suite, CTest runner, and live API roundtrip.',
-    renderIcon: () => <CheckSquare size={30} strokeWidth={2.2} color="#10B981" />,
+    renderIcon: () => <CheckSquare size={30} strokeWidth={2.2} color="#22C55E" />,
   },
   {
     id: 'docs',
@@ -209,17 +209,17 @@ export default function Dashboard({ backendUp, health, sysInfo, onNavigate }: Pr
                     style={{
                       fontSize: 10.5,
                       fontWeight: 600,
-                      color: mod.id === 'tests' ? '#10B981' : 'var(--primary-blue)',
+                      color: mod.id === 'tests' ? '#22C55E' : 'var(--primary-blue)',
                       background:
                         mod.id === 'tests'
-                          ? 'rgba(16, 185, 129, 0.12)'
-                          : 'rgba(37, 131, 255, 0.12)',
+                          ? 'rgba(34, 197, 94, 0.14)'
+                          : 'rgba(59, 130, 246, 0.14)',
                       border:
                         mod.id === 'tests'
-                          ? '1px solid rgba(16, 185, 129, 0.3)'
-                          : '1px solid rgba(37, 131, 255, 0.3)',
+                          ? '1px solid rgba(34, 197, 94, 0.35)'
+                          : '1px solid rgba(59, 130, 246, 0.35)',
                       padding: '2px 8px',
-                      borderRadius: 12,
+                      borderRadius: 'var(--radius-sm)',
                       letterSpacing: '0.03em',
                     }}
                   >
@@ -241,9 +241,9 @@ export default function Dashboard({ backendUp, health, sysInfo, onNavigate }: Pr
                         onNavigate(sub.target);
                       }}
                       style={{
-                        background: 'rgba(37, 131, 255, 0.1)',
-                        border: '1px solid rgba(37, 131, 255, 0.3)',
-                        borderRadius: 6,
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        borderRadius: 'var(--radius-sm)',
                         color: 'var(--primary-blue)',
                         fontSize: 11,
                         fontWeight: 600,
@@ -252,11 +252,11 @@ export default function Dashboard({ backendUp, health, sysInfo, onNavigate }: Pr
                         transition: 'all 0.15s ease',
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgba(37, 131, 255, 0.25)';
+                        e.currentTarget.style.background = 'rgba(59, 130, 246, 0.25)';
                         e.currentTarget.style.color = '#FFFFFF';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'rgba(37, 131, 255, 0.1)';
+                        e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
                         e.currentTarget.style.color = 'var(--primary-blue)';
                       }}
                     >

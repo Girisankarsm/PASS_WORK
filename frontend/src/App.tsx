@@ -23,28 +23,28 @@ function SidebarCubeLogo({ size = 32 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path
         d="M20 4L34 12V28L20 36L6 28V12L20 4Z"
-        stroke="#2583FF"
+        stroke="#3B82F6"
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M20 20L34 12"
-        stroke="#2583FF"
+        stroke="#3B82F6"
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M20 20V36"
-        stroke="#2583FF"
+        stroke="#3B82F6"
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M20 20L6 12"
-        stroke="#2583FF"
+        stroke="#3B82F6"
         strokeWidth="2.8"
         strokeLinecap="round"
         strokeLinejoin="round"

@@ -296,18 +296,19 @@ export default function PerformanceLab({
                 <div style={{ width: '100%', height: 240 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={allRuns} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#233147" />
-                      <XAxis dataKey="workers" stroke="#64748B" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#64748B" fontSize={11} tickLine={false} unit=" ms" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
+                      <XAxis dataKey="workers" stroke="#94A3B8" fontSize={11} tickLine={false} />
+                      <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} unit=" ms" />
                       <Tooltip
                         contentStyle={{
-                          background: '#152033',
-                          border: '1px solid #233147',
-                          borderRadius: 8,
+                          background: '#162238',
+                          border: '1px solid #29384F',
+                          borderRadius: 6,
                           fontSize: 12,
+                          color: '#F1F5F9',
                         }}
                       />
-                      <Bar dataKey="median_ms" fill="#2583FF" name="Median (ms)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="median_ms" fill="#3B82F6" name="Median (ms)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -320,23 +321,24 @@ export default function PerformanceLab({
                 <div style={{ width: '100%', height: 240 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={allRuns} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#233147" />
-                      <XAxis dataKey="workers" stroke="#64748B" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#64748B" fontSize={11} tickLine={false} unit="×" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#29384F" />
+                      <XAxis dataKey="workers" stroke="#94A3B8" fontSize={11} tickLine={false} />
+                      <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} unit="×" />
                       <Tooltip
                         contentStyle={{
-                          background: '#152033',
-                          border: '1px solid #233147',
-                          borderRadius: 8,
+                          background: '#162238',
+                          border: '1px solid #29384F',
+                          borderRadius: 6,
                           fontSize: 12,
+                          color: '#F1F5F9',
                         }}
                       />
                       <Line
                         type="monotone"
                         dataKey="speedup"
                         stroke="#22C55E"
-                        strokeWidth={2.5}
-                        dot={{ r: 4, fill: '#22C55E' }}
+                        strokeWidth={2.2}
+                        dot={{ r: 3.5, fill: '#22C55E' }}
                         name="Speedup"
                       />
                     </LineChart>

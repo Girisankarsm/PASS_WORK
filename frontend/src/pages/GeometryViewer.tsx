@@ -359,7 +359,7 @@ function WorldAxes({ length }: { length: number }) {
             fontSize: 10.5,
             fontWeight: 700,
             color: '#EF4444',
-            background: 'rgba(15, 23, 42, 0.75)',
+            background: 'rgba(22, 34, 56, 0.85)',
             padding: '1px 5px',
             borderRadius: 3,
             border: '1px solid rgba(239, 68, 68, 0.4)',
@@ -374,11 +374,11 @@ function WorldAxes({ length }: { length: number }) {
           style={{
             fontSize: 10.5,
             fontWeight: 700,
-            color: '#10B981',
-            background: 'rgba(15, 23, 42, 0.75)',
+            color: '#22C55E',
+            background: 'rgba(22, 34, 56, 0.85)',
             padding: '1px 5px',
             borderRadius: 3,
-            border: '1px solid rgba(16, 185, 129, 0.4)',
+            border: '1px solid rgba(34, 197, 94, 0.4)',
             letterSpacing: '0.04em',
           }}
         >
@@ -391,7 +391,7 @@ function WorldAxes({ length }: { length: number }) {
             fontSize: 10.5,
             fontWeight: 700,
             color: '#3B82F6',
-            background: 'rgba(15, 23, 42, 0.75)',
+            background: 'rgba(22, 34, 56, 0.85)',
             padding: '1px 5px',
             borderRadius: 3,
             border: '1px solid rgba(59, 130, 246, 0.4)',
@@ -1287,7 +1287,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               bottom: 14,
               left: 14,
               zIndex: 10,
-              background: 'rgba(11, 18, 32, 0.85)',
+              background: 'rgba(22, 34, 56, 0.85)',
               padding: '6px 12px',
               borderRadius: 'var(--radius-sm)',
               border: '1px solid var(--border)',
@@ -1301,7 +1301,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
           >
             <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>World Axes:</span>
             <span style={{ color: '#EF4444', fontWeight: 600 }}>X</span>
-            <span style={{ color: '#10B981', fontWeight: 600 }}>Y</span>
+            <span style={{ color: '#22C55E', fontWeight: 600 }}>Y</span>
             <span style={{ color: '#3B82F6', fontWeight: 600 }}>Z (Height)</span>
             <span style={{ color: 'var(--text-muted)', borderLeft: '1px solid var(--border)', paddingLeft: 6 }}>
               Grid: XY Ground Plane
@@ -1311,7 +1311,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
           {/* 3D Canvas with Consistent Z-Up World Frame */}
           <Canvas
             camera={{ position: [3, -3, 2.5], fov: 45, up: [0, 0, 1] }}
-            style={{ background: '#090E18', width: '100%', height: '100%' }}
+            style={{ background: '#0B1120', width: '100%', height: '100%' }}
             onPointerMissed={() => setSelectedNode(null)}
           >
             {/* Studio 3-Point Lighting tuned for CAD contrast and curved highlight definition */}
