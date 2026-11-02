@@ -105,6 +105,9 @@ REQUIRED_PATHS = [
     "docs/EMBEDDED_DESIGN.md",
     "docs/ASSIGNMENT_COMPLIANCE_AUDIT.md",
     "docs/COMPLIANCE_CHECKLIST.md",
+    "docs/CODE_QUALITY_AND_MAINTAINABILITY.md",
+    "docs/SOFTWARE_ARCHITECTURE_AND_PROJECT_STRUCTURE.md",
+    "docs/CPP_BACKEND_VERIFICATION_AND_TESTING.md",
     # VS Code run config
     ".vscode/tasks.json",
     ".vscode/launch.json",
