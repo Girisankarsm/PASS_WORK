@@ -253,7 +253,7 @@ def main():
     if missing:
         print(f"[MISSING] {len(missing)} required file(s) not in archive:")
         for m in missing:
-            print(f"  ✗ {m}")
+            print(f"  [MISSING] {m}")
         sys.exit(1)
     else:
         print(f"[OK] All {len(REQUIRED_PATHS)} required files present.")

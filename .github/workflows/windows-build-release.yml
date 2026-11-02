@@ -118,6 +118,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "CTest verification failed."
           }
+      - name: Create Git Repository Bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          git bundle create PASS_WORK_repo.bundle --all
+          if ($LASTEXITCODE -ne 0) {
+            throw "Git bundle creation failed."
+          }
+          if (!(Test-Path "PASS_WORK_repo.bundle")) {
+            throw "PASS_WORK_repo.bundle was not created."
+          }
+          Write-Host "Git repository bundle created successfully."
 
       - name: Assemble Windows Release Package
         shell: powershell
@@ -152,7 +164,6 @@ jobs:
         run: |
           "PYTHONUTF8=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "PYTHONIOENCODING=utf-8" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
       - name: Smoke Test Launcher and Health Endpoint
         shell: powershell
         run: |
