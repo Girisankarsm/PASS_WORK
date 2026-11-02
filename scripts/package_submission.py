@@ -186,10 +186,16 @@ def collect_files(root: Path):
 
 def verify_required(zip_paths: set):
     """Check that all required paths are present in the archive."""
+    normalized_paths = {
+        str(p).replace("\\\\", "/")
+        for p in zip_paths
+    }
+
     missing = []
     for req in REQUIRED_PATHS:
-        zp = f"{ZIP_PREFIX}/{req}"
-        if zp not in zip_paths:
+        normalized_req = str(req).replace("\\\\", "/")
+        expected = f"{ZIP_PREFIX}/{normalized_req}"
+        if expected not in normalized_paths:
             missing.append(req)
     return missing
 
@@ -238,7 +244,8 @@ def main():
 
     with zipfile.ZipFile(OUTPUT_PATH, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for abs_path, rel in collect_files(ROOT):
-            arc_name = f"{ZIP_PREFIX}/{rel}"
+            rel_name = rel.as_posix()
+            arc_name = f"{ZIP_PREFIX}/{rel_name}"
             zf.write(abs_path, arc_name)
             zip_paths.add(arc_name)
             file_count += 1
@@ -248,27 +255,19 @@ def main():
     print(f"\nArchived {file_count} files total.")
 
 
+
     # Verify required files
     print("\n--- Verifying Required Files ---")
-
     missing = verify_required(zip_paths)
 
     if missing:
         print(f"[MISSING] {len(missing)} required file(s) not in archive:")
-
-        for req in missing:
-            file_path = ROOT / req
-            print(f"  [MISSING] {req}")
-            print(f"    Exists locally: {file_path.exists()}")
-
-            if file_path.exists():
-                print(f"    Excluded by rules: {should_exclude(file_path, ROOT)}")
-            else:
-                print("    Reason: File does not exist locally.")
-
+        for m in missing:
+            print(f"  [MISSING] {m}")
         sys.exit(1)
     else:
         print(f"[OK] All {len(REQUIRED_PATHS)} required files present.")
+
 
 
     # Archive stats
