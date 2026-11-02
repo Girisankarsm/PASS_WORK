@@ -13,6 +13,10 @@
 // Clearly labeled as SIMULATED - no physical hardware tested
 // ============================================================
 
+#ifdef ERROR
+#undef ERROR
+#endif
+
 namespace hardware {
 
 enum class DeviceType { MCU, FPGA, JTAG };

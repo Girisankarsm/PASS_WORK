@@ -10,6 +10,7 @@ frontend/dist/
 *.a
 *.dylib
 *.so
+*.exe
 
 # CMake
 CMakeCache.txt

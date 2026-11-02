@@ -52,8 +52,9 @@ def build_standalone_release_dir():
     ]
     for exe in launch_candidates:
         if os.path.exists(exe):
+            shutil.copy2(exe, os.path.join(RELEASE_DIR, "Launch.exe"))
             shutil.copy2(exe, os.path.join(RELEASE_DIR, "UnifiedEngineeringWorkbench.exe"))
-            print(f"  + binary:  UnifiedEngineeringWorkbench.exe")
+            print(f"  + binary:  Launch.exe & UnifiedEngineeringWorkbench.exe")
             break
 
     # 3. Production Frontend bundle

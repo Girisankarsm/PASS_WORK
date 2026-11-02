@@ -33,7 +33,7 @@ EXCLUDE_REL_PATHS = {
 }
 
 EXCLUDE_SUFFIXES = {
-    ".o", ".a", ".so", ".dylib", ".exe", ".obj",
+    ".o", ".a", ".so", ".dylib", ".obj",
     ".cache", ".tsbuildinfo", ".bak", ".orig",
     ".DS_Store",
 }
@@ -47,6 +47,9 @@ EXCLUDE_FILENAMES = {
 
 # Files/dirs that MUST appear in the archive (checked after build)
 REQUIRED_PATHS = [
+    # Windows native executables
+    "Launch.exe",
+    "workbench_server.exe",
     # Core source
     "src/main.cpp",
     "src/core/thermal_solver.hpp",
@@ -63,7 +66,8 @@ REQUIRED_PATHS = [
     "frontend/src/lib/api.ts",
     "frontend/src/types/api.ts",
     "frontend/package.json",
-    # Compiled frontend bundle (self-hosting)
+    # Compiled frontend bundle (self-hosting at root and frontend/)
+    "dist/index.html",
     "frontend/dist/index.html",
     # Data
     "data/stl/unit_cube.stl",
@@ -199,6 +203,20 @@ def main():
     if not dist_index.exists():
         print("ERROR: frontend/dist/index.html not found — run 'npm run build' first.")
         sys.exit(1)
+
+    # Confirm Windows executables exist
+    launch_exe = ROOT / "Launch.exe"
+    server_exe = ROOT / "workbench_server.exe"
+    if not launch_exe.exists() or not server_exe.exists():
+        print("ERROR: Launch.exe or workbench_server.exe not found at repository root.")
+        sys.exit(1)
+
+    # Confirm dist/ at root exists
+    root_dist = ROOT / "dist" / "index.html"
+    if not root_dist.exists():
+        print("Copying frontend/dist to root dist/...")
+        import shutil
+        shutil.copytree(ROOT / "frontend" / "dist", ROOT / "dist", dirs_exist_ok=True)
 
     # Confirm git bundle is current
     bundle = ROOT / "PASS_WORK_repo.bundle"

@@ -54,14 +54,17 @@ jobs:
 
       - name: Assemble Windows Standalone Release Package
         run: |
-          python scripts/package_windows.py
+          copy build\Release\workbench_server.exe .
+          copy build\Release\Launch.exe .
+          python scripts\package_windows.py
+          python scripts\package_submission.py
 
-      - name: Smoke Test Backend Startup & Health Endpoint on Windows
+      - name: Smoke Test Launch.exe & Health Endpoint on Windows
         shell: powershell
         run: |
-          Write-Host "Starting workbench_server.exe for automated smoke test..."
-          $proc = Start-Process -FilePath "release\workbench_server.exe" -ArgumentList "8080" -WorkingDirectory "release" -PassThru
-          Start-Sleep -Seconds 3
+          Write-Host "Starting Launch.exe in headless mode for automated smoke test..."
+          $proc = Start-Process -FilePath "Launch.exe" -ArgumentList "--no-browser" -WorkingDirectory "." -PassThru
+          Start-Sleep -Seconds 4
 
           try {
             $health = Invoke-RestMethod -Uri "http://localhost:8080/api/health" -TimeoutSec 5
@@ -69,18 +72,20 @@ jobs:
             if ($health.success -ne $true) {
               throw "Health check did not return success: true"
             }
-            Write-Host "SUCCESS: Windows x64 binary started and served health endpoint successfully!"
+            Write-Host "SUCCESS: Launch.exe spawned backend and served health endpoint successfully!"
           } finally {
-            Write-Host "Terminating test backend process (PID $($proc.Id))..."
+            Write-Host "Terminating Launch.exe and backend process tree (PID $($proc.Id))..."
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process -Name "workbench_server" -ErrorAction SilentlyContinue | Stop-Process -Force
           }
 
-      - name: Upload Windows Standalone Package Artifact
+      - name: Upload Windows Submission Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PassScience_Workbench_windows_x64
+          name: RA2311003012331_Workbench_Release
           path: |
+            RA2311003012331_Workbench.zip
+            RA2311003012331_Workbench.zip.sha256
             PassScience_Workbench_windows_x64.zip
-            PassScience_Workbench.zip
             release/
           retention-days: 30
