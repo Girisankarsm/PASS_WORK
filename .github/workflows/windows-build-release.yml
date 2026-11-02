@@ -1,4 +1,4 @@
-```yaml
+
 name: Windows x64 Build, Test & Release
 
 on:
@@ -199,4 +199,4 @@ jobs:
             release/
           if-no-files-found: error
           retention-days: 30
-```
+
