@@ -247,16 +247,29 @@ def main():
 
     print(f"\nArchived {file_count} files total.")
 
+
     # Verify required files
     print("\n--- Verifying Required Files ---")
+
     missing = verify_required(zip_paths)
+
     if missing:
         print(f"[MISSING] {len(missing)} required file(s) not in archive:")
-        for m in missing:
-            print(f"  [MISSING] {m}")
+
+        for req in missing:
+            file_path = ROOT / req
+            print(f"  [MISSING] {req}")
+            print(f"    Exists locally: {file_path.exists()}")
+
+            if file_path.exists():
+                print(f"    Excluded by rules: {should_exclude(file_path, ROOT)}")
+            else:
+                print("    Reason: File does not exist locally.")
+
         sys.exit(1)
     else:
         print(f"[OK] All {len(REQUIRED_PATHS)} required files present.")
+
 
     # Archive stats
     size_bytes = OUTPUT_PATH.stat().st_size
