@@ -18,6 +18,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+      
+      - name: Create Git Repository Bundle
+        shell: bash
+        run: |
+          git bundle create PASS_WORK_repo.bundle --all
+          git bundle verify PASS_WORK_repo.bundle
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
