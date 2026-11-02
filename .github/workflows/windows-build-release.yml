@@ -1,10 +1,11 @@
+```yaml
 name: Windows x64 Build, Test & Release
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
   pull_request:
-    branches: [ master, main ]
+    branches: [master, main]
   workflow_dispatch:
 
 jobs:
@@ -13,72 +14,180 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # 1. Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'frontend/package-lock.json'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
+      # 3. Setup Python
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install Frontend Dependencies & Build Bundle
+      # 4. Verify required tools and Visual Studio
+      - name: Verify Visual Studio and C++ Toolchain
+        shell: powershell
         run: |
-          cd frontend
+          Write-Host "Checking CMake..."
+          cmake --version
+
+          Write-Host "Checking Visual Studio installation..."
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          if (Test-Path $vswhere) {
+            $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+
+            if ($vsPath) {
+              Write-Host "Visual Studio with C++ tools found at: $vsPath"
+            } else {
+              Write-Error "Visual Studio with the required C++ tools was not found."
+              exit 1
+            }
+          } else {
+            Write-Error "vswhere.exe was not found."
+            exit 1
+          }
+
+      # 5. Build frontend
+      - name: Install Frontend Dependencies & Build Bundle
+        shell: powershell
+        run: |
+          Set-Location frontend
           npm ci
           npx tsc --noEmit
           npm run build
-          cd ..
+          Set-Location ..
 
+      # 6. Run scientific classification tests
       - name: Run Scientific Classification Test Suite
-        run: |
-          node scripts/test_geometry_classification.mjs
+        run: node scripts/test_geometry_classification.mjs
 
+      # 7. Configure CMake
       - name: Configure CMake (Visual Studio 2022 x64 Release)
-        run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
+      # 8. Build C++ binaries
       - name: Build C++ Binaries (Server, Tests, Launcher)
-        run: |
-          cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel
 
+      # 9. Run C++ tests
       - name: Run C++ Automated Verification Test Suite (CTest)
-        run: |
-          ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure
 
+      # 10. Package Windows release
       - name: Assemble Windows Standalone Release Package
+        shell: powershell
         run: |
-          copy build\Release\workbench_server.exe .
-          copy build\Release\Launch.exe .
-          python scripts\package_windows.py
-          python scripts\package_submission.py
+          $ErrorActionPreference = "Stop"
 
+          if (!(Test-Path "build\Release\workbench_server.exe")) {
+            throw "Missing build\Release\workbench_server.exe"
+          }
+
+          if (!(Test-Path "build\Release\Launch.exe")) {
+            throw "Missing build\Release\Launch.exe"
+          }
+
+          Copy-Item "build\Release\workbench_server.exe" ".\workbench_server.exe" -Force
+          Copy-Item "build\Release\Launch.exe" ".\Launch.exe" -Force
+
+          python scripts/package_windows.py
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows packaging script failed."
+          }
+
+          python scripts/package_submission.py
+          if ($LASTEXITCODE -ne 0) {
+            throw "Submission packaging script failed."
+          }
+
+      # 11. Smoke-test standalone launcher
       - name: Smoke Test Launch.exe & Health Endpoint on Windows
         shell: powershell
         run: |
-          Write-Host "Starting Launch.exe in headless mode for automated smoke test..."
-          $proc = Start-Process -FilePath "Launch.exe" -ArgumentList "--no-browser" -WorkingDirectory "." -PassThru
-          Start-Sleep -Seconds 4
+          $ErrorActionPreference = "Stop"
 
-          try {
-            $health = Invoke-RestMethod -Uri "http://localhost:8080/api/health" -TimeoutSec 5
-            Write-Host "Health Check Response:" ($health | ConvertTo-Json)
-            if ($health.success -ne $true) {
-              throw "Health check did not return success: true"
-            }
-            Write-Host "SUCCESS: Launch.exe spawned backend and served health endpoint successfully!"
-          } finally {
-            Write-Host "Terminating Launch.exe and backend process tree (PID $($proc.Id))..."
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Get-Process -Name "workbench_server" -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (!(Test-Path ".\Launch.exe")) {
+            throw "Launch.exe was not found."
           }
 
+          Write-Host "Starting Launch.exe in headless mode..."
+
+          $proc = Start-Process `
+            -FilePath ".\Launch.exe" `
+            -ArgumentList "--no-browser" `
+            -WorkingDirectory "." `
+            -PassThru
+
+          try {
+            Start-Sleep -Seconds 4
+
+            if ($proc.HasExited) {
+              throw "Launch.exe exited unexpectedly with code $($proc.ExitCode)."
+            }
+
+            $health = Invoke-RestMethod `
+              -Uri "http://localhost:8080/api/health" `
+              -TimeoutSec 10
+
+            Write-Host "Health Check Response:"
+            $health | ConvertTo-Json -Depth 5
+
+            if ($health.success -ne $true) {
+              throw "Health endpoint did not return success: true."
+            }
+
+            Write-Host "SUCCESS: Launcher and backend health check passed."
+          }
+          finally {
+            Write-Host "Stopping launcher and backend..."
+
+            if ($proc -and !$proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+
+            Get-Process -Name "workbench_server" -ErrorAction SilentlyContinue |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      # 12. Verify release artifacts
+      - name: Verify Release Artifacts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $expectedFiles = @(
+            "RA2311003012331_Workbench.zip",
+            "RA2311003012331_Workbench.zip.sha256",
+            "PassScience_Workbench_windows_x64.zip"
+          )
+
+          foreach ($file in $expectedFiles) {
+            if (!(Test-Path $file)) {
+              Write-Host "Expected artifact not found at repository root: $file"
+            } else {
+              Write-Host "Found artifact: $file"
+            }
+          }
+
+          Get-ChildItem -Path . -Filter "*.zip" -File -ErrorAction SilentlyContinue |
+            Select-Object Name, Length
+
+          if (!(Test-Path "RA2311003012331_Workbench.zip") -and
+              !(Test-Path "PassScience_Workbench_windows_x64.zip") -and
+              !(Test-Path "release")) {
+            throw "No expected release ZIP or release directory was found. Check the packaging scripts."
+          }
+
+      # 13. Upload release artifacts
       - name: Upload Windows Submission Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -88,4 +197,6 @@ jobs:
             RA2311003012331_Workbench.zip.sha256
             PassScience_Workbench_windows_x64.zip
             release/
+          if-no-files-found: error
           retention-days: 30
+```
