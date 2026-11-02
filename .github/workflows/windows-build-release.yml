@@ -1,3 +1,4 @@
+
 name: Windows x64 Build, Test & Release
 
 on:
@@ -18,12 +19,29 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-      
-      - name: Create Git Repository Bundle
-        shell: bash
+
+      - name: Configure Python UTF-8 Encoding
+        shell: powershell
         run: |
+          "PYTHONUTF8=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PYTHONIOENCODING=utf-8" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Create Git Repository Bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
           git bundle create PASS_WORK_repo.bundle --all
+          if ($LASTEXITCODE -ne 0) {
+            throw "Git bundle creation failed."
+          }
+
           git bundle verify PASS_WORK_repo.bundle
+          if ($LASTEXITCODE -ne 0) {
+            throw "Git bundle verification failed."
+          }
+
+          Write-Host "Git repository bundle created successfully."
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -53,7 +71,11 @@ jobs:
             throw "vswhere.exe was not found."
           }
 
-          $vsPath = & $vswhere -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vsPath = & $vswhere `
+            -version "[17.0,18.0)" `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
 
           if (!$vsPath) {
             throw "Visual Studio 2022 with C++ tools was not found."
@@ -118,18 +140,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "CTest verification failed."
           }
-      - name: Create Git Repository Bundle
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-          git bundle create PASS_WORK_repo.bundle --all
-          if ($LASTEXITCODE -ne 0) {
-            throw "Git bundle creation failed."
-          }
-          if (!(Test-Path "PASS_WORK_repo.bundle")) {
-            throw "PASS_WORK_repo.bundle was not created."
-          }
-          Write-Host "Git repository bundle created successfully."
 
       - name: Assemble Windows Release Package
         shell: powershell
@@ -155,15 +165,18 @@ jobs:
             throw "Windows packaging script failed."
           }
 
+          if (!(Test-Path "PASS_WORK_repo.bundle")) {
+            throw "PASS_WORK_repo.bundle is missing."
+          }
+
+          Write-Host "Checking required submission files in the checkout..."
+          git status --short
+
           python scripts/package_submission.py
           if ($LASTEXITCODE -ne 0) {
             throw "Submission packaging script failed."
           }
-      - name: Configure Python UTF-8 Encoding
-        shell: powershell
-        run: |
-          "PYTHONUTF8=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "PYTHONIOENCODING=utf-8" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Smoke Test Launcher and Health Endpoint
         shell: powershell
         run: |
@@ -221,6 +234,9 @@ jobs:
           foreach ($file in $expectedFiles) {
             if (Test-Path $file) {
               Write-Host "Found artifact: $file"
+            }
+            else {
+              Write-Warning "Expected artifact not found: $file"
             }
           }
 
