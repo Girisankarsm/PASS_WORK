@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
-  Home, Box, Thermometer, Zap, Cpu, Share2, CheckSquare, BookOpen
+  Home, Box, Thermometer, Zap, Cpu, Share2, CheckSquare, BookOpen,
+  Moon, Palette
 } from 'lucide-react';
 import { api } from './lib/api';
 import { ThemeProvider, useTheme } from './lib/theme';
@@ -147,25 +148,25 @@ function AppShell() {
 
         {/* Theme Toggle */}
         <div className="sidebar-theme-section">
-          <span className="sidebar-theme-label">Display Theme</span>
-          <div className="theme-toggle" style={{ width: '100%', justifyContent: 'stretch' }}>
+          <span className="sidebar-theme-label">Theme</span>
+          <div className="theme-toggle" role="group" aria-label="Display theme selection">
             <button
               id="theme-btn-blue"
               className={`theme-toggle-btn${theme === 'blue' ? ' active' : ''}`}
-              style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => setTheme('blue')}
               title="Blue Mode — dark navy engineering palette"
             >
-              🔵 Blue
+              <Palette size={12} strokeWidth={2.2} />
+              <span>Blue</span>
             </button>
             <button
               id="theme-btn-dark"
               className={`theme-toggle-btn${theme === 'dark' ? ' active' : ''}`}
-              style={{ flex: 1, justifyContent: 'center' }}
               onClick={() => setTheme('dark')}
               title="Dark Mode — true black & charcoal palette"
             >
-              🌙 Dark
+              <Moon size={12} strokeWidth={2.2} />
+              <span>Dark</span>
             </button>
           </div>
         </div>

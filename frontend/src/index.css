@@ -870,40 +870,48 @@ html, body {
 .theme-toggle {
   display: flex;
   align-items: center;
-  background: var(--bg-card-elevated);
+  background: rgba(0, 0, 0, 0.24);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
+  border-radius: 6px;
+  padding: 2px;
   gap: 2px;
+  width: 100%;
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
 .theme-toggle-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-secondary);
-  transition: all 0.18s ease;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
   white-space: nowrap;
+  flex: 1;
 }
 
 .theme-toggle-btn:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .theme-toggle-btn.active {
   background: var(--primary-blue);
   color: #ffffff;
-  box-shadow: 0 2px 8px var(--primary-glow);
+  font-weight: 600;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .theme-toggle-btn.active:hover {
@@ -912,18 +920,18 @@ html, body {
 
 /* Sidebar theme toggle wrapper */
 .sidebar-theme-section {
-  padding: 12px 8px 0;
+  padding: 10px 4px 0;
   border-top: 1px solid var(--border);
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .sidebar-theme-label {
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 8px;
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
   display: block;
 }
 
