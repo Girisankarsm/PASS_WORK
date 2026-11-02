@@ -147,6 +147,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Submission packaging script failed."
           }
+      - name: Configure Python UTF-8 Encoding
+        shell: powershell
+        run: |
+          "PYTHONUTF8=1" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PYTHONIOENCODING=utf-8" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Smoke Test Launcher and Health Endpoint
         shell: powershell
