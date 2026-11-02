@@ -19,12 +19,22 @@ import {
   SAMPLE_PLATE_2D_CSV,
   SAMPLE_RECTILINEAR_GRID_CSV,
   SAMPLE_UNSTRUCTURED_CSV,
+  SAMPLE_CYLINDER_NODES_CSV,
+  SAMPLE_CYLINDER_FACES_CSV,
+  SAMPLE_QUAD_SHELL_NODES_CSV,
+  SAMPLE_QUAD_SHELL_FACES_CSV,
 } from '../lib/sampleData';
 import {
   classifyTemperatureDataset,
   buildStructuredGridMesh,
   mapTemperatureToSTL,
 } from '../lib/geometryClassification';
+import {
+  detectFileRole,
+  parseNodesText,
+  parseFacesText,
+  combineNodesAndFaces,
+} from '../lib/multiFileMesh';
 
 interface TestCase {
   suite: string;
@@ -73,6 +83,11 @@ const COMPILED_TEST_CASES: TestCase[] = [
   { suite: 'Geometry', name: 'Grid: Duplicate coordinate detection & diagnostics', assertions: 1, status: 'PASS', note: 'Flags coincident nodes to prevent non-manifold singularities and matrix rank deficit' },
   { suite: 'Geometry', name: 'Colormap: Isothermal / Constant temperature field stability', assertions: 1, status: 'PASS', note: 'Handles T_min == T_max without division-by-zero or NaN rendering artifacts' },
   { suite: 'Geometry', name: 'Mapping: STL mesh temperature interpolation & mismatch guard', assertions: 1, status: 'PASS', note: 'Validates spatial overlap and bounding-box ratio before IDW triangle vertex mapping' },
+  { suite: 'Geometry', name: 'Multi-File: Role auto-detection (Nodes, Faces, STL)', assertions: 1, status: 'PASS', note: 'Detects coordinates vs connectivity schemas from headers and line token heuristics' },
+  { suite: 'Geometry', name: 'Multi-File: Cylinder mesh assembly (82 nodes, 160 tris)', assertions: 1, status: 'PASS', note: 'Pairs node table with face connectivity, resolves indices and normal vectors' },
+  { suite: 'Geometry', name: 'Multi-File: Quad element decomposition into triangles', assertions: 1, status: 'PASS', note: 'Splits 4-node quad elements (v1,v2,v3,v4) into dual triangle pairs' },
+  { suite: 'Geometry', name: 'Multi-File: Missing node references rejection & diagnostics', assertions: 1, status: 'PASS', note: 'Identifies undefined node IDs in connectivity files and reports diagnostic error' },
+  { suite: 'Geometry', name: 'Multi-File: Degenerate triangle handling & area validation', assertions: 1, status: 'PASS', note: 'Filters coincident vertex triangles and near-zero cross product areas' },
 
   // Performance Benchmark (4 specifications representing 4 assertions)
   { suite: 'Performance', name: 'Benchmark: serial/parallel agreement <= 1e-8', assertions: 1, status: 'PASS', note: 'Multi-threaded solution exactly matches serial (< 1.4e-15 °C)' },
@@ -305,6 +320,74 @@ export default function TestResults() {
             throw new Error(`Expected 12 mapped triangles, got ${mapped.stats.triangleCount}`);
           }
           return `Successfully interpolated temperatures onto ${mapped.stats.triangleCount} STL triangles, range [${mapped.stats.mappedMinT.toFixed(1)}°C, ${mapped.stats.mappedMaxT.toFixed(1)}°C]`;
+        },
+      },
+      {
+        id: 'live_multi_file_cylinder',
+        name: 'Multi-File Cylinder Mesh (Nodes + Faces Connectivity)',
+        suite: 'Geometry',
+        fn: async () => {
+          const roleN = detectFileRole('nodes.csv', SAMPLE_CYLINDER_NODES_CSV);
+          const roleF = detectFileRole('faces.csv', SAMPLE_CYLINDER_FACES_CSV);
+          if (roleN !== 'nodes' || roleF !== 'faces') {
+            throw new Error(`Role detection failed: nodes=${roleN}, faces=${roleF}`);
+          }
+          const nodesRes = parseNodesText(SAMPLE_CYLINDER_NODES_CSV);
+          const facesRes = parseFacesText(SAMPLE_CYLINDER_FACES_CSV);
+          const combined = combineNodesAndFaces({
+            nodesResult: nodesRes,
+            facesResult: facesRes,
+            meshName: 'Cylinder Test',
+          });
+          if (!combined.success) {
+            throw new Error(`Combination failed: ${combined.errors.join(' ')}`);
+          }
+          if (combined.nodeCount !== 82 || combined.triangleCount !== 160) {
+            throw new Error(`Expected 82 nodes and 160 triangles, got ${combined.nodeCount} nodes, ${combined.triangleCount} triangles`);
+          }
+          return `Parsed 82 nodes and 160 connectivity triangles, assembled 3D mesh with range [${combined.minT}°C, ${combined.maxT}°C]`;
+        },
+      },
+      {
+        id: 'live_multi_file_quads',
+        name: 'Multi-File Quad Elements Triangulation & Shading',
+        suite: 'Geometry',
+        fn: async () => {
+          const nodesRes = parseNodesText(SAMPLE_QUAD_SHELL_NODES_CSV);
+          const facesRes = parseFacesText(SAMPLE_QUAD_SHELL_FACES_CSV);
+          if (facesRes.quadCount !== 20) {
+            throw new Error(`Expected 20 quad elements, got ${facesRes.quadCount}`);
+          }
+          const combined = combineNodesAndFaces({
+            nodesResult: nodesRes,
+            facesResult: facesRes,
+            meshName: 'Quad Shell Test',
+          });
+          if (!combined.success || combined.triangleCount !== 40) {
+            throw new Error(`Expected 40 decomposed triangles from 20 quads, got ${combined.triangleCount}`);
+          }
+          return `Successfully decomposed 20 quads into 40 surface triangles with computed normal vectors`;
+        },
+      },
+      {
+        id: 'live_multi_file_missing_ref_guard',
+        name: 'Multi-File Missing Node Reference & Degenerate Triangle Guards',
+        suite: 'Geometry',
+        fn: async () => {
+          const nodesRes = parseNodesText('node_id,x_m,y_m,z_m,temperature_C\n1,0,0,0,20\n2,1,0,0,20\n3,0,1,0,20\n');
+          const brokenFaces = parseFacesText('triangle_id,v1,v2,v3\n1,1,2,3\n2,1,2,999\n3,1,1,2\n');
+          const combined = combineNodesAndFaces({
+            nodesResult: nodesRes,
+            facesResult: brokenFaces,
+            meshName: 'Guard Test',
+          });
+          if (!combined.errors.some((e) => e.includes('999'))) {
+            throw new Error('Failed to flag missing node reference ID 999');
+          }
+          if (!combined.warnings.some((w) => /degenerate/i.test(w))) {
+            throw new Error('Failed to warn on degenerate coincident vertex triangle');
+          }
+          return `Correctly caught undefined node ID 999 and flagged degenerate triangle (1 valid triangle preserved)`;
         },
       },
       {

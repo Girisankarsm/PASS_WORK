@@ -20,6 +20,9 @@ import {
   MousePointer,
   CheckCircle2,
   Sliders,
+  FileText,
+  FolderUp,
+  Trash2,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useTheme } from '../lib/theme';
@@ -32,6 +35,15 @@ import {
   getTemperatureCss,
 } from '../lib/geometryClassification';
 import {
+  detectFileRole,
+  parseNodesText,
+  parseFacesText,
+  combineNodesAndFaces,
+  type MultiFileMeshResult,
+  type FileItem,
+  type FileRole,
+} from '../lib/multiFileMesh';
+import {
   SAMPLE_CUBE_STL,
   SAMPLE_CYLINDER_STL,
   SAMPLE_ROD_CSV,
@@ -41,6 +53,10 @@ import {
   SAMPLE_UNSTRUCTURED_CSV,
   SAMPLE_IRREGULAR_BRACKET_STL,
   SAMPLE_LARGE_MANIFOLD_STL,
+  SAMPLE_CYLINDER_NODES_CSV,
+  SAMPLE_CYLINDER_FACES_CSV,
+  SAMPLE_QUAD_SHELL_NODES_CSV,
+  SAMPLE_QUAD_SHELL_FACES_CSV,
   MALFORMED_STL,
   MALFORMED_CSV,
 } from '../lib/sampleData';
@@ -380,6 +396,136 @@ function ScientificTemperatureView({
   );
 }
 
+// ── Multi-File Connected Mesh View ──────────────────────────────────────────
+function ConnectedMeshView({
+  result,
+  displayStyle,
+  selectedId,
+  onSelect,
+  onBoundsCalculated,
+}: {
+  result: MultiFileMeshResult;
+  displayStyle: TempDisplayStyle;
+  selectedId: number | null;
+  onSelect: (node: TempNode | null) => void;
+  onBoundsCalculated: (radius: number, dimensions: { dx: number; dy: number; dz: number }) => void;
+}) {
+  const { radius, dimensions, pointsGeometry, selectedPos } = useMemo(() => {
+    const { min, max, center } = result.bounds;
+    const spanX = max[0] - min[0];
+    const spanY = max[1] - min[1];
+    const spanZ = max[2] - min[2];
+    const maxSpan = Math.max(spanX, spanY, spanZ, 0.001);
+    const rad = Math.max(maxSpan * 0.75, 0.5);
+
+    const pos: number[] = [];
+    const colors: number[] = [];
+    let selP: [number, number, number] | null = null;
+    const tRange = result.maxT - result.minT || 1.0;
+
+    for (const n of result.nodes) {
+      const px = n.x - center[0];
+      const py = n.y - center[1];
+      const pz = n.z - center[2];
+      pos.push(px, py, pz);
+
+      if (result.hasTemperature) {
+        const tNorm = (n.T - result.minT) / tRange;
+        const [r, g, b] = getTemperatureRgb(tNorm);
+        colors.push(r, g, b);
+      } else {
+        colors.push(0.72, 0.77, 0.85);
+      }
+
+      if (selectedId !== null && n.id === selectedId) {
+        selP = [px, py, pz];
+      }
+    }
+
+    const pGeom = new THREE.BufferGeometry();
+    pGeom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    pGeom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    return {
+      radius: rad,
+      dimensions: { dx: spanX, dy: spanY, dz: spanZ },
+      pointsGeometry: pGeom,
+      selectedPos: selP,
+    };
+  }, [result, selectedId]);
+
+  useEffect(() => {
+    onBoundsCalculated(radius, dimensions);
+  }, [radius, dimensions, onBoundsCalculated]);
+
+  const pointSize = Math.max(0.012, Math.min(0.06, radius * 0.025));
+
+  return (
+    <group>
+      {/* 1. Surface Mesh */}
+      {result.surfaceGeometry && (displayStyle === 'surface' || displayStyle === 'surface_nodes') && (
+        <mesh geometry={result.surfaceGeometry}>
+          <meshStandardMaterial
+            vertexColors={result.hasTemperature}
+            color={result.hasTemperature ? '#FFFFFF' : '#94A3B8'}
+            roughness={0.35}
+            metalness={0.15}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* 2. Wireframe Lines */}
+      {result.wireGeometry && (displayStyle === 'wireframe' || displayStyle === 'surface_nodes') && (
+        <lineSegments geometry={result.wireGeometry}>
+          <lineBasicMaterial
+            color={displayStyle === 'wireframe' ? '#60A5FA' : '#0F172A'}
+            opacity={displayStyle === 'wireframe' ? 0.95 : 0.4}
+            transparent
+            depthTest={true}
+          />
+        </lineSegments>
+      )}
+
+      {/* 3. Node Points (when surface_nodes or nodes_only) */}
+      {(displayStyle === 'surface_nodes' || displayStyle === 'nodes_only') && (
+        <points
+          geometry={pointsGeometry}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.index !== undefined && result.nodes[e.index]) {
+              onSelect(result.nodes[e.index]);
+            }
+          }}
+        >
+          <pointsMaterial
+            size={Math.max(6, Math.min(16, 240 / (radius * 15 + 10)))}
+            sizeAttenuation={false}
+            vertexColors={result.hasTemperature}
+            color={result.hasTemperature ? '#FFFFFF' : '#94A3B8'}
+            transparent
+            opacity={0.92}
+          />
+        </points>
+      )}
+
+      {/* 4. Selection Highlight */}
+      {selectedPos && (
+        <group position={selectedPos}>
+          <mesh>
+            <sphereGeometry args={[pointSize * 1.1, 16, 16]} />
+            <meshBasicMaterial color="#FBBF24" />
+          </mesh>
+          <mesh>
+            <sphereGeometry args={[pointSize * 2.0, 20, 20]} />
+            <meshBasicMaterial color="#FBBF24" transparent opacity={0.25} />
+          </mesh>
+        </group>
+      )}
+    </group>
+  );
+}
+
 // ── World Axes Helper ────────────────────────────────────────────────────────
 function WorldAxes({ length }: { length: number }) {
   const l = Math.max(length, 0.6);
@@ -625,7 +771,8 @@ function TempLegend({
 export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const [stlResult, setStlResult] = useState<STLResult | null>(null);
   const [csvResult, setCsvResult] = useState<CSVResult | null>(null);
-  const [activeMode, setActiveMode] = useState<'none' | 'stl' | 'csv' | 'stl_temp'>('none');
+  const [multiMeshResult, setMultiMeshResult] = useState<MultiFileMeshResult | null>(null);
+  const [activeMode, setActiveMode] = useState<'none' | 'stl' | 'csv' | 'stl_temp' | 'multi_mesh'>('none');
   const [visMode, setVisMode] = useState<VisMode>('solid');
   const [tempDisplayStyle, setTempDisplayStyle] = useState<TempDisplayStyle>('surface');
   const [selectedNode, setSelectedNode] = useState<TempNode | null>(null);
@@ -633,6 +780,11 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { cssVar } = useTheme();
+
+  // Multi-file import staging state
+  const [importMode, setImportMode] = useState<'single' | 'multi'>('single');
+  const [stagedFiles, setStagedFiles] = useState<FileItem[]>([]);
+  const multiFileRef = useRef<HTMLInputElement>(null);
 
   // Model bounding dimensions and camera fit trigger
   const [modelRadius, setModelRadius] = useState<number>(1.0);
@@ -657,6 +809,153 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const triggerResetView = useCallback(() => {
     setFitTrigger((t) => t + 1);
   }, []);
+
+  // Multi-File Staging Handlers
+  const addFilesToStaging = useCallback(async (files: FileList | File[]) => {
+    setError(null);
+    setNotice(null);
+    const newItems: FileItem[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const text = await file.text();
+        const detected = detectFileRole(file.name, text);
+        newItems.push({
+          id: `${file.name}-${Date.now()}-${i}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          detectedRole: detected,
+          assignedRole: detected !== 'unknown' ? detected : 'auto',
+          text,
+        });
+      } catch (err: any) {
+        newItems.push({
+          id: `${file.name}-${Date.now()}-${i}-${Math.random()}`,
+          file,
+          name: file.name,
+          size: file.size,
+          detectedRole: 'unknown',
+          assignedRole: 'auto',
+          error: err.message || 'Failed to read file',
+        });
+      }
+    }
+    setStagedFiles((prev) => [...prev, ...newItems]);
+    setImportMode('multi');
+  }, []);
+
+  const removeStagedFile = useCallback((id: string) => {
+    setStagedFiles((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const updateFileRole = useCallback((id: string, role: FileRole) => {
+    setStagedFiles((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, assignedRole: role } : item))
+    );
+  }, []);
+
+  const clearStagedFiles = useCallback(() => {
+    setStagedFiles([]);
+  }, []);
+
+  const processMultiFileImport = useCallback(async () => {
+    if (stagedFiles.length === 0) return;
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+
+    try {
+      let nodesItem: FileItem | undefined;
+      let facesItem: FileItem | undefined;
+      let stlItem: FileItem | undefined;
+
+      for (const item of stagedFiles) {
+        const role = item.assignedRole === 'auto' ? item.detectedRole : item.assignedRole;
+        if (role === 'nodes' && !nodesItem) nodesItem = item;
+        else if (role === 'faces' && !facesItem) facesItem = item;
+        else if (role === 'stl' && !stlItem) stlItem = item;
+      }
+
+      // Case 1: STL + Nodes/Temperature CSV
+      if (stlItem && nodesItem) {
+        const stlText = stlItem.text || (await stlItem.file.text());
+        const csvText = nodesItem.text || (await nodesItem.file.text());
+        const stlRes = await api.parseSTL(stlText);
+        const csvRes = await api.parseCSV(csvText);
+
+        setStlResult(stlRes);
+        setCsvResult(csvRes);
+        setMultiMeshResult(null);
+
+        const mapping = mapTemperatureToSTL({ stl: stlRes, csv: csvRes });
+        if (mapping.success) {
+          setActiveMode('stl_temp');
+          setVisMode('temperature');
+          setNotice(`Mapped ${csvRes.node_count} temperature nodes onto STL CAD mesh "${stlRes.name}".`);
+        } else {
+          setActiveMode('stl');
+          setVisMode('solid');
+          setNotice(`STL mesh loaded. Mapping note: ${mapping.errorMessage}`);
+        }
+        setSelectedNode(null);
+        setFitTrigger((t) => t + 1);
+        return;
+      }
+
+      // Case 2: Nodes CSV + Faces / Connectivity CSV
+      if (nodesItem && facesItem) {
+        const nodesText = nodesItem.text || (await nodesItem.file.text());
+        const facesText = facesItem.text || (await facesItem.file.text());
+
+        const nodesParsed = parseNodesText(nodesText);
+        const facesParsed = parseFacesText(facesText);
+
+        const combined = combineNodesAndFaces({
+          nodesResult: nodesParsed,
+          facesResult: facesParsed,
+          meshName: `${nodesItem.name} + ${facesItem.name}`,
+        });
+
+        if (!combined.success) {
+          throw new Error(combined.errors.join(' '));
+        }
+
+        setMultiMeshResult(combined);
+        setActiveMode('multi_mesh');
+        setTempDisplayStyle(combined.hasTemperature ? 'surface_nodes' : 'wireframe');
+        setSelectedNode(null);
+        setFitTrigger((t) => t + 1);
+
+        let noticeMsg = `Successfully imported connected mesh (${combined.nodeCount} nodes, ${combined.triangleCount} triangles).`;
+        if (combined.warnings.length > 0) {
+          noticeMsg += ` Note: ${combined.warnings.join(' ')}`;
+        }
+        setNotice(noticeMsg);
+        return;
+      }
+
+      // Validation feedback if roles are incomplete
+      if (nodesItem && !facesItem) {
+        throw new Error(
+          `Node coordinates file "${nodesItem.name}" is staged, but no face connectivity file was selected. Please select or drag a faces/triangles CSV file (e.g. triangle_id,v1,v2,v3).`
+        );
+      }
+      if (facesItem && !nodesItem) {
+        throw new Error(
+          `Face connectivity file "${facesItem.name}" is staged, but no node coordinates file was selected. Please select or drag a nodes CSV file (e.g. node_id,x_m,y_m,z_m,temperature_C).`
+        );
+      }
+
+      throw new Error(
+        'Please stage both a Node Coordinates file and a Face Connectivity file (or an STL mesh and temperature CSV).'
+      );
+    } catch (err: any) {
+      setError(err instanceof ApiError ? err.message : err.message || 'Multi-file import failed.');
+    } finally {
+      setLoading(false);
+    }
+  }, [stagedFiles]);
 
   // Scientific classification of current CSV dataset
   const classificationReport = useMemo(() => {
@@ -795,6 +1094,8 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         | 'rect_grid_csv'
         | 'unstructured_csv'
         | 'hybrid_cube_temp'
+        | 'cylinder_multi_mesh'
+        | 'quad_shell_multi_mesh'
         | 'bad_stl'
         | 'bad_csv'
     ) => {
@@ -806,6 +1107,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         if (type === 'cube_stl') {
           const r = await api.parseSTL(SAMPLE_CUBE_STL);
           setStlResult(r);
+          setMultiMeshResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
@@ -813,6 +1115,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'cylinder_stl') {
           const r = await api.parseSTL(SAMPLE_CYLINDER_STL);
           setStlResult(r);
+          setMultiMeshResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
@@ -820,6 +1123,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'bracket_stl') {
           const r = await api.parseSTL(SAMPLE_IRREGULAR_BRACKET_STL);
           setStlResult(r);
+          setMultiMeshResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
@@ -827,6 +1131,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'large_stl') {
           const r = await api.parseSTL(SAMPLE_LARGE_MANIFOLD_STL);
           setStlResult(r);
+          setMultiMeshResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
@@ -834,6 +1139,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'cube_27_csv') {
           const r = await api.parseCSV(SAMPLE_CUBE_27_CSV);
           setCsvResult(r);
+          setMultiMeshResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
@@ -841,6 +1147,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'rod_1d_csv') {
           const r = await api.parseCSV(SAMPLE_ROD_CSV);
           setCsvResult(r);
+          setMultiMeshResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
@@ -848,6 +1155,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'plate_2d_csv') {
           const r = await api.parseCSV(SAMPLE_PLATE_2D_CSV);
           setCsvResult(r);
+          setMultiMeshResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
@@ -855,6 +1163,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'rect_grid_csv') {
           const r = await api.parseCSV(SAMPLE_RECTILINEAR_GRID_CSV);
           setCsvResult(r);
+          setMultiMeshResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
@@ -862,6 +1171,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         } else if (type === 'unstructured_csv') {
           const r = await api.parseCSV(SAMPLE_UNSTRUCTURED_CSV);
           setCsvResult(r);
+          setMultiMeshResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
@@ -871,11 +1181,44 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
           const rCsv = await api.parseCSV(SAMPLE_CUBE_27_CSV);
           setStlResult(rStl);
           setCsvResult(rCsv);
+          setMultiMeshResult(null);
           setActiveMode('stl_temp');
           setVisMode('temperature');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
           setNotice('Mapped 27-node 3D steady-state thermal field onto Unit Cube CAD mesh.');
+        } else if (type === 'cylinder_multi_mesh') {
+          const nodesRes = parseNodesText(SAMPLE_CYLINDER_NODES_CSV);
+          const facesRes = parseFacesText(SAMPLE_CYLINDER_FACES_CSV);
+          const combined = combineNodesAndFaces({
+            nodesResult: nodesRes,
+            facesResult: facesRes,
+            meshName: 'Curved Cylinder Mesh (Multi-File)',
+          });
+          setMultiMeshResult(combined);
+          setActiveMode('multi_mesh');
+          setTempDisplayStyle('surface_nodes');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+          setNotice(
+            'Loaded multi-file curved cylinder mesh with 82 nodes, 160 triangles, and continuous temperature field (25°C to 105°C).'
+          );
+        } else if (type === 'quad_shell_multi_mesh') {
+          const nodesRes = parseNodesText(SAMPLE_QUAD_SHELL_NODES_CSV);
+          const facesRes = parseFacesText(SAMPLE_QUAD_SHELL_FACES_CSV);
+          const combined = combineNodesAndFaces({
+            nodesResult: nodesRes,
+            facesResult: facesRes,
+            meshName: 'Aerodynamic Quad Shell (Multi-File)',
+          });
+          setMultiMeshResult(combined);
+          setActiveMode('multi_mesh');
+          setTempDisplayStyle('surface_nodes');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+          setNotice(
+            'Loaded multi-file aerodynamic shell mesh with 30 nodes and 20 quad elements decomposed into 40 surface triangles.'
+          );
         } else if (type === 'bad_stl') {
           await api.parseSTL(MALFORMED_STL);
         } else if (type === 'bad_csv') {
@@ -931,49 +1274,264 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* File Upload Card */}
           <div className="card">
-            <div className="card-header">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="card-title">
-                <Upload size={16} /> Import Geometry / Data
+                <Upload size={16} /> Import Geometry & Data
               </span>
+              <div style={{ display: 'flex', background: 'rgba(255, 255, 255, 0.05)', borderRadius: 6, padding: 2 }}>
+                <button
+                  type="button"
+                  style={{
+                    border: 'none',
+                    background: importMode === 'single' ? 'var(--primary-blue)' : 'transparent',
+                    color: importMode === 'single' ? '#FFFFFF' : 'var(--text-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '3px 8px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onClick={() => setImportMode('single')}
+                >
+                  Single File
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    border: 'none',
+                    background: importMode === 'multi' ? 'var(--primary-blue)' : 'transparent',
+                    color: importMode === 'multi' ? '#FFFFFF' : 'var(--text-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '3px 8px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  onClick={() => setImportMode('multi')}
+                >
+                  <FolderUp size={11} /> Multi-File
+                </button>
+              </div>
             </div>
 
-            <div
-              style={{
-                border: '2px dashed var(--border)',
-                borderRadius: 'var(--radius)',
-                padding: '20px 14px',
-                textAlign: 'center',
-                cursor: 'pointer',
-                marginBottom: 14,
-                background: 'rgba(255, 255, 255, 0.015)',
-                transition: 'all 0.2s ease',
-              }}
-              onClick={() => fileRef.current?.click()}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--primary-blue)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-            >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".stl,.csv"
-                style={{ display: 'none' }}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-              />
-              <Upload
-                size={22}
+            {importMode === 'single' ? (
+              <div
                 style={{
-                  margin: '0 auto 6px',
-                  color: 'var(--primary-blue)',
-                  opacity: 0.85,
+                  border: '2px dashed var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: '18px 14px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  marginBottom: 14,
+                  background: 'rgba(255, 255, 255, 0.015)',
+                  transition: 'all 0.2s ease',
                 }}
-              />
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
-                Import STL Mesh or Temperature CSV
+                onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.style.borderColor = 'var(--primary-blue)';
+                }}
+                onDragLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.style.borderColor = 'var(--border)';
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    if (e.dataTransfer.files.length > 1) {
+                      addFilesToStaging(e.dataTransfer.files);
+                    } else {
+                      handleFile(e.dataTransfer.files[0]);
+                    }
+                  }
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--primary-blue)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".stl,.csv"
+                  style={{ display: 'none' }}
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                />
+                <Upload
+                  size={20}
+                  style={{
+                    margin: '0 auto 6px',
+                    color: 'var(--primary-blue)',
+                    opacity: 0.85,
+                  }}
+                />
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
+                  Import STL Mesh or Temperature CSV
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  Drag & drop single file, or switch to Multi-File for separate nodes & connectivity
+                </div>
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                Auto-classifies structured grids, point clouds & CAD models
+            ) : (
+              /* Multi-File Staging and Role Selector Area */
+              <div style={{ marginBottom: 14 }}>
+                <input
+                  ref={multiFileRef}
+                  type="file"
+                  multiple
+                  accept=".csv,.stl,.txt,.dat"
+                  style={{ display: 'none' }}
+                  onChange={(e) => e.target.files && e.target.files.length > 0 && addFilesToStaging(e.target.files)}
+                />
+                <div
+                  style={{
+                    border: '2px dashed var(--primary-blue)',
+                    borderRadius: 'var(--radius)',
+                    padding: '14px 12px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: 'rgba(59, 130, 246, 0.04)',
+                    marginBottom: 10,
+                  }}
+                  onClick={() => multiFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      addFilesToStaging(e.dataTransfer.files);
+                    }
+                  }}
+                >
+                  <FolderUp size={20} style={{ margin: '0 auto 4px', color: '#60A5FA' }} />
+                  <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-main)' }}>
+                    Select or Drop Multiple Files Together
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Select Nodes CSV + Faces/Connectivity CSV, or STL + Temperature CSV
+                  </div>
+                </div>
+
+                {/* Staged Files List */}
+                {stagedFiles.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>STAGED FILES ({stagedFiles.length})</span>
+                      <button
+                        type="button"
+                        onClick={clearStagedFiles}
+                        style={{ background: 'transparent', border: 'none', color: '#EF4444', fontSize: 10.5, cursor: 'pointer', padding: 0 }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
+
+                    {stagedFiles.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px',
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          fontSize: 11.5,
+                        }}
+                      >
+                        <FileText size={14} style={{ color: 'var(--primary-blue)', flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.name}>
+                            {item.name}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            {(item.size / 1024).toFixed(1)} KB
+                          </div>
+                        </div>
+
+                        {/* Role Selector Dropdown */}
+                        <select
+                          value={item.assignedRole}
+                          onChange={(e) => updateFileRole(item.id, e.target.value as FileRole)}
+                          style={{
+                            background: 'rgba(15, 23, 42, 0.8)',
+                            color: 'var(--text-main)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 4,
+                            padding: '3px 6px',
+                            fontSize: 10.5,
+                            outline: 'none',
+                          }}
+                        >
+                          <option value="auto">Auto ({item.detectedRole})</option>
+                          <option value="nodes">Nodes CSV (Coords & Temp)</option>
+                          <option value="faces">Faces CSV (Connectivity)</option>
+                          <option value="stl">STL CAD Mesh</option>
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => removeStagedFile(item.id)}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
+                          title="Remove file"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Staging readiness validation badge */}
+                    {(() => {
+                      const hasNodes = stagedFiles.some((f) => (f.assignedRole === 'auto' ? f.detectedRole : f.assignedRole) === 'nodes');
+                      const hasFaces = stagedFiles.some((f) => (f.assignedRole === 'auto' ? f.detectedRole : f.assignedRole) === 'faces');
+                      const hasStl = stagedFiles.some((f) => (f.assignedRole === 'auto' ? f.detectedRole : f.assignedRole) === 'stl');
+
+                      if (hasNodes && hasFaces) {
+                        return (
+                          <div style={{ fontSize: 11, color: '#10B981', display: 'flex', alignItems: 'center', gap: 5, padding: '4px 6px', background: 'rgba(16,185,129,0.08)', borderRadius: 4 }}>
+                            <CheckCircle2 size={13} /> Ready: Nodes file & Faces connectivity file paired.
+                          </div>
+                        );
+                      } else if (hasStl && hasNodes) {
+                        return (
+                          <div style={{ fontSize: 11, color: '#10B981', display: 'flex', alignItems: 'center', gap: 5, padding: '4px 6px', background: 'rgba(16,185,129,0.08)', borderRadius: 4 }}>
+                            <CheckCircle2 size={13} /> Ready: STL CAD mesh & Temperature CSV paired.
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div style={{ fontSize: 11, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 5, padding: '4px 6px', background: 'rgba(245,158,11,0.08)', borderRadius: 4 }}>
+                            <AlertTriangle size={13} /> Add complementary file ({!hasNodes ? 'Nodes CSV' : !hasFaces ? 'Faces CSV' : 'file'}).
+                          </div>
+                        );
+                      }
+                    })()}
+
+                    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ flex: 1 }}
+                        onClick={processMultiFileImport}
+                        disabled={loading || stagedFiles.length < 2}
+                      >
+                        <Layers size={13} /> Import & Combine Mesh
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => multiFileRef.current?.click()}
+                      >
+                        Add Files…
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
             {/* Quick Sample Load Buttons */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1082,6 +1640,29 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                 <Thermometer size={13} /> Map Temp on Cube STL
               </button>
 
+              {/* Multi-File Meshes (Nodes + Faces CSV) */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>
+                Multi-File Meshes (Nodes + Faces)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('cylinder_multi_mesh')}
+                  disabled={loading}
+                  title="Multi-File Curved Cylinder: 82 nodes, 160 triangles (Nodes CSV + Faces CSV)"
+                >
+                  <Layers size={13} /> Cylinder Mesh
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('quad_shell_multi_mesh')}
+                  disabled={loading}
+                  title="Aerodynamic Quad Shell: 30 nodes, 20 quad elements decomposed into 40 triangles"
+                >
+                  <Box size={13} /> Quad Shell
+                </button>
+              </div>
+
               {/* Negative Test Validation */}
               <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Negative Tests
@@ -1153,6 +1734,153 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
           {loading && (
             <div className="alert alert-warning" style={{ fontSize: 12.5 }}>
               Processing dataset in numerical engine…
+            </div>
+          )}
+
+          {/* Multi-File Connected Mesh Info Card */}
+          {activeMode === 'multi_mesh' && multiMeshResult && (
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={16} style={{ color: '#10B981' }} />
+                  Connected Mesh Model
+                </span>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    border: '1px solid rgba(16, 185, 129, 0.5)',
+                    color: '#34D399',
+                  }}
+                >
+                  MULTI-FILE MESH
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }}>
+                <div style={{ color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  {multiMeshResult.summary}
+                </div>
+
+                <div
+                  style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Nodes:</span>
+                    <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                      {multiMeshResult.nodeCount}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Elements / Faces:</span>
+                    <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                      {multiMeshResult.faceCount}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Surface Triangles:</span>
+                    <span className="mono" style={{ color: '#38BDF8', fontWeight: 600 }}>
+                      {multiMeshResult.triangleCount}
+                    </span>
+                  </div>
+                  {multiMeshResult.hasTemperature ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Temperature Range:</span>
+                      <span className="mono" style={{ color: '#93C5FD' }}>
+                        {multiMeshResult.minT.toFixed(1)}°C → {multiMeshResult.maxT.toFixed(1)}°C
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Field Type:</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Geometric Mesh (No temperature)</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Bounding Box:</span>
+                    <span className="mono" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+                      {modelDimensions.dx.toFixed(2)} × {modelDimensions.dy.toFixed(2)} × {modelDimensions.dz.toFixed(2)} m
+                    </span>
+                  </div>
+                </div>
+
+                {/* Warnings / Notices */}
+                {multiMeshResult.warnings.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {multiMeshResult.warnings.map((w, idx) => (
+                      <div key={idx} style={{ color: '#F59E0B', fontSize: 11.5, display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <AlertTriangle size={13} style={{ flexShrink: 0 }} /> {w}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Node inspection panel */}
+                {selectedNode && (
+                  <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(71,85,105,0.6)', borderRadius: 8, overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '7px 10px',
+                        borderBottom: '1px solid rgba(51,65,85,0.5)',
+                        background: 'rgba(255,255,255,0.03)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div
+                          style={{
+                            width: 9,
+                            height: 9,
+                            borderRadius: '50%',
+                            background: '#10B981',
+                            boxShadow: '0 0 5px #10B981',
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: 12 }}>
+                          Selected Node #{selectedNode.id}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setSelectedNode(null)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11.5 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Coordinates (x, y, z):</span>
+                        <span className="mono" style={{ color: 'var(--text-main)' }}>
+                          [{selectedNode.x.toFixed(3)}, {selectedNode.y.toFixed(3)}, {selectedNode.z.toFixed(3)}] m
+                        </span>
+                      </div>
+                      {multiMeshResult.hasTemperature && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Temperature:</span>
+                          <span className="mono" style={{ color: '#FBBF24', fontWeight: 700 }}>
+                            {selectedNode.T.toFixed(2)} °C
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1489,7 +2217,8 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             )}
 
             {/* Display Style Selector for Temperature CSV mode */}
-            {activeMode === 'csv' && (
+            {/* Display Style Selector for Temperature CSV mode and Multi-File Connected Mesh */}
+            {(activeMode === 'csv' || activeMode === 'multi_mesh') && (
               <div
                 style={{
                   display: 'inline-flex',
@@ -1503,8 +2232,8 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                   className={`btn btn-sm ${tempDisplayStyle === 'surface' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
                   onClick={() => setTempDisplayStyle('surface')}
-                  title="Continuous temperature-colored solid surface"
-                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                  title="Continuous solid surface"
+                  disabled={activeMode === 'csv' && classificationReport?.type === 'unstructured_cloud'}
                 >
                   <Box size={12} /> Surface
                 </button>
@@ -1512,8 +2241,8 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                   className={`btn btn-sm ${tempDisplayStyle === 'surface_nodes' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
                   onClick={() => setTempDisplayStyle('surface_nodes')}
-                  title="Continuous surface with discrete measurement node markers"
-                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                  title="Continuous surface with discrete node markers"
+                  disabled={activeMode === 'csv' && classificationReport?.type === 'unstructured_cloud'}
                 >
                   <Layers size={12} /> Surface + Nodes
                 </button>
@@ -1521,7 +2250,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                   className={`btn btn-sm ${tempDisplayStyle === 'nodes_only' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
                   onClick={() => setTempDisplayStyle('nodes_only')}
-                  title="Measured nodal temperature points only"
+                  title="Node coordinate points only"
                 >
                   <MousePointer size={12} /> Nodes
                 </button>
@@ -1529,10 +2258,10 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                   className={`btn btn-sm ${tempDisplayStyle === 'wireframe' ? 'btn-primary' : 'btn-secondary'}`}
                   style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
                   onClick={() => setTempDisplayStyle('wireframe')}
-                  title="Structured cell grid wireframe"
-                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                  title="Element connectivity mesh wireframe"
+                  disabled={activeMode === 'csv' && classificationReport?.type === 'unstructured_cloud'}
                 >
-                  <Grid size={12} /> Grid
+                  <Grid size={12} /> Wireframe
                 </button>
               </div>
             )}
@@ -1598,6 +2327,17 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               />
             )}
 
+            {/* Multi-File Connected Mesh */}
+            {multiMeshResult && activeMode === 'multi_mesh' && (
+              <ConnectedMeshView
+                result={multiMeshResult}
+                displayStyle={tempDisplayStyle}
+                selectedId={selectedNode?.id ?? null}
+                onSelect={(n) => setSelectedNode(n)}
+                onBoundsCalculated={handleBoundsCalculated}
+              />
+            )}
+
             {/* Scientific Temperature View (CSV Mode) */}
             {csvResult && activeMode === 'csv' && (
               <ScientificTemperatureView
@@ -1651,24 +2391,27 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             </GizmoHelper>
           </Canvas>
 
-          {/* Floating Temperature Legend (when CSV or Hybrid mode is active) */}
-          {csvResult && (activeMode === 'csv' || (activeMode === 'stl_temp' && visMode === 'temperature')) && (
+          {/* Floating Temperature Legend */}
+          {((csvResult && (activeMode === 'csv' || (activeMode === 'stl_temp' && visMode === 'temperature'))) ||
+            (activeMode === 'multi_mesh' && multiMeshResult && multiMeshResult.hasTemperature)) && (
             <TempLegend
-              tMin={csvResult.T_min}
-              tMax={csvResult.T_max}
+              tMin={activeMode === 'multi_mesh' && multiMeshResult ? multiMeshResult.minT : csvResult!.T_min}
+              tMax={activeMode === 'multi_mesh' && multiMeshResult ? multiMeshResult.maxT : csvResult!.T_max}
               selectedT={selectedNode?.T ?? null}
-              nodeCount={csvResult.node_count}
+              nodeCount={activeMode === 'multi_mesh' && multiMeshResult ? multiMeshResult.nodeCount : csvResult!.node_count}
               classificationTitle={
-                activeMode === 'stl_temp'
+                activeMode === 'multi_mesh' && multiMeshResult
+                  ? `Connected Multi-File Mesh ("${multiMeshResult.name}")`
+                  : activeMode === 'stl_temp'
                   ? `STL Mesh ("${stlResult?.name}") + Mapped Field`
                   : classificationReport?.title || 'Temperature Field'
               }
-              badgeColor={classificationReport?.badgeColor || '#3B82F6'}
+              badgeColor={activeMode === 'multi_mesh' ? '#10B981' : (classificationReport?.badgeColor || '#3B82F6')}
             />
           )}
 
           {/* Empty state overlay */}
-          {!stlResult && !csvResult && !loading && (
+          {!stlResult && !csvResult && !multiMeshResult && !loading && (
             <div
               style={{
                 position: 'absolute',

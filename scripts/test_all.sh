@@ -15,13 +15,16 @@ cd build && ctest --output-on-failure && cd ..
 echo "3. Scientific Geometry & Temperature Dataset Test Suite..."
 node scripts/test_geometry_classification.mjs
 
-echo "4. Frontend TypeScript Typecheck..."
+echo "4. Multi-File Mesh Import & Validation Test Suite..."
+node scripts/test_multi_file_mesh.mjs
+
+echo "5. Frontend TypeScript Typecheck..."
 cd frontend && npx tsc --noEmit && cd ..
 
-echo "5. Frontend Production Build Check..."
+echo "6. Frontend Production Build Check..."
 cd frontend && npm run build && cd ..
 
-echo "5. End-to-End API Integration Verification..."
+echo "7. End-to-End API Integration Verification..."
 ./build/workbench_server 8080 &
 SERVER_PID=$!
 sleep 1.5
