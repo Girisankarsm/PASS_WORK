@@ -12,10 +12,13 @@ echo "1. C++ Automated Tests (128 assertions)..."
 echo "2. CTest Suite..."
 cd build && ctest --output-on-failure && cd ..
 
-echo "3. Frontend TypeScript Typecheck..."
+echo "3. Scientific Geometry & Temperature Dataset Test Suite..."
+node scripts/test_geometry_classification.mjs
+
+echo "4. Frontend TypeScript Typecheck..."
 cd frontend && npx tsc --noEmit && cd ..
 
-echo "4. Frontend Production Build Check..."
+echo "5. Frontend Production Build Check..."
 cd frontend && npm run build && cd ..
 
 echo "5. End-to-End API Integration Verification..."

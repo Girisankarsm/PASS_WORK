@@ -15,7 +15,16 @@ import {
   SAMPLE_CUBE_STL,
   SAMPLE_ROD_CSV,
   MALFORMED_STL,
+  SAMPLE_CUBE_27_CSV,
+  SAMPLE_PLATE_2D_CSV,
+  SAMPLE_RECTILINEAR_GRID_CSV,
+  SAMPLE_UNSTRUCTURED_CSV,
 } from '../lib/sampleData';
+import {
+  classifyTemperatureDataset,
+  buildStructuredGridMesh,
+  mapTemperatureToSTL,
+} from '../lib/geometryClassification';
 
 interface TestCase {
   suite: string;
@@ -56,6 +65,14 @@ const COMPILED_TEST_CASES: TestCase[] = [
   { suite: 'Geometry', name: 'CSV: reject wrong header', assertions: 1, status: 'PASS', note: 'Rejects mismatched column schemas' },
   { suite: 'Geometry', name: 'CSV: reject missing columns', assertions: 1, status: 'PASS', note: 'Rejects incomplete row vectors' },
   { suite: 'Geometry', name: 'CSV: reject empty file', assertions: 1, status: 'PASS', note: 'Rejects zero-length CSV streams' },
+  { suite: 'Geometry', name: 'Grid: 3D cube (3x3x3=27) dynamic tensor classification', assertions: 1, status: 'PASS', note: 'Identifies structured 3D volume, uniform step 0.05m, extracts boundary quad/triangle surface' },
+  { suite: 'Geometry', name: 'Grid: 2D planar plate (5x4=20) sheet surface mesh', assertions: 1, status: 'PASS', note: 'Detects zero-thickness Z-plane, constructs continuous 2D planar quad sheet' },
+  { suite: 'Geometry', name: 'Grid: 1D collinear rod (21 nodes along X)', assertions: 1, status: 'PASS', note: 'Detects single active spatial axis, enables continuous axial gradient polyline' },
+  { suite: 'Geometry', name: 'Grid: Rectilinear 3D non-uniform grid with negative temps', assertions: 1, status: 'PASS', note: 'Detects non-uniform coordinate spacing, handles negative range -36°C to +112.5°C' },
+  { suite: 'Geometry', name: 'Grid: Unstructured point cloud without tensor product', assertions: 1, status: 'PASS', note: 'Rejects artificial solid fabrication, preserves raw sensor cloud with diagnostic notice' },
+  { suite: 'Geometry', name: 'Grid: Duplicate coordinate detection & diagnostics', assertions: 1, status: 'PASS', note: 'Flags coincident nodes to prevent non-manifold singularities and matrix rank deficit' },
+  { suite: 'Geometry', name: 'Colormap: Isothermal / Constant temperature field stability', assertions: 1, status: 'PASS', note: 'Handles T_min == T_max without division-by-zero or NaN rendering artifacts' },
+  { suite: 'Geometry', name: 'Mapping: STL mesh temperature interpolation & mismatch guard', assertions: 1, status: 'PASS', note: 'Validates spatial overlap and bounding-box ratio before IDW triangle vertex mapping' },
 
   // Performance Benchmark (4 specifications representing 4 assertions)
   { suite: 'Performance', name: 'Benchmark: serial/parallel agreement <= 1e-8', assertions: 1, status: 'PASS', note: 'Multi-threaded solution exactly matches serial (< 1.4e-15 °C)' },
@@ -190,6 +207,104 @@ export default function TestResults() {
           const res = await api.parseCSV(SAMPLE_ROD_CSV);
           if (res.node_count !== 21) throw new Error(`Expected 21 nodes, got ${res.node_count}`);
           return `Parsed ${res.node_count} nodes, T_min=${res.T_min}°C, T_max=${res.T_max}°C`;
+        },
+      },
+      {
+        id: 'live_geom_3d_cube',
+        name: 'Dynamic 3D Structured Tensor & Surface Reconstruction',
+        suite: 'Geometry',
+        fn: async () => {
+          const parsed = await api.parseCSV(SAMPLE_CUBE_27_CSV);
+          const classification = classifyTemperatureDataset(parsed.nodes);
+          if (classification.type !== 'structured_3d' || !classification.gridInfo) {
+            throw new Error(`Expected structured_3d, got ${classification.type}`);
+          }
+          const mesh = buildStructuredGridMesh({
+            gridInfo: classification.gridInfo,
+            tMin: parsed.T_min,
+            tMax: parsed.T_max,
+            center: [0, 0, 0],
+          });
+          const triCount = mesh.surfaceGeometry.getAttribute('position').count / 3;
+          if (triCount !== 48) {
+            throw new Error(`Expected 48 boundary triangles (6 faces * 8 triangles), got ${triCount}`);
+          }
+          return `Classified as ${classification.type} (${classification.gridInfo.dims.join('×')}), built ${triCount} boundary triangles, uniform: ${classification.gridInfo.isUniformSpacing}`;
+        },
+      },
+      {
+        id: 'live_geom_plate_2d',
+        name: 'Planar 2D Grid & Continuous Sheet Surface Mesh',
+        suite: 'Geometry',
+        fn: async () => {
+          const parsed = await api.parseCSV(SAMPLE_PLATE_2D_CSV);
+          const classification = classifyTemperatureDataset(parsed.nodes);
+          if (classification.type !== 'structured_2d' || !classification.gridInfo) {
+            throw new Error(`Expected structured_2d, got ${classification.type}`);
+          }
+          const mesh = buildStructuredGridMesh({
+            gridInfo: classification.gridInfo,
+            tMin: parsed.T_min,
+            tMax: parsed.T_max,
+            center: [0, 0, 0],
+          });
+          const triCount = mesh.surfaceGeometry.getAttribute('position').count / 3;
+          if (triCount !== 24) {
+            throw new Error(`Expected 24 planar sheet triangles (4x3 cells * 2), got ${triCount}`);
+          }
+          return `Classified as ${classification.type} (${classification.gridInfo.dims.join('×')}), sheet mesh has ${triCount} triangles`;
+        },
+      },
+      {
+        id: 'live_geom_rectilinear_neg',
+        name: 'Rectilinear Non-Cubic Grid with Negative Temperatures',
+        suite: 'Geometry',
+        fn: async () => {
+          const parsed = await api.parseCSV(SAMPLE_RECTILINEAR_GRID_CSV);
+          const classification = classifyTemperatureDataset(parsed.nodes);
+          if (classification.type !== 'structured_3d' || !classification.gridInfo || classification.gridInfo.isUniformSpacing) {
+            throw new Error(`Expected non-uniform structured_3d, got ${classification.type}, uniform: ${classification.gridInfo?.isUniformSpacing}`);
+          }
+          if (parsed.T_min !== -36.0 || parsed.T_max !== 112.5) {
+            throw new Error(`Expected temp range [-36, 112.5], got [${parsed.T_min}, ${parsed.T_max}]`);
+          }
+          return `Classified ${classification.gridInfo.dims.join('×')} non-uniform grid, range [${parsed.T_min}°C, ${parsed.T_max}°C] verified`;
+        },
+      },
+      {
+        id: 'live_geom_unstructured_guard',
+        name: 'Unstructured Cloud Detection & False Solid Guard',
+        suite: 'Geometry',
+        fn: async () => {
+          const parsed = await api.parseCSV(SAMPLE_UNSTRUCTURED_CSV);
+          const classification = classifyTemperatureDataset(parsed.nodes);
+          if (classification.type !== 'unstructured_cloud') {
+            throw new Error(`Expected unstructured_cloud, got ${classification.type}`);
+          }
+          if (classification.gridInfo !== undefined) {
+            throw new Error('Unstructured cloud must NOT invent artificial solid meshes');
+          }
+          return `Correctly detected as unstructured point cloud (14 sensor points), artificial solid prevented`;
+        },
+      },
+      {
+        id: 'live_stl_temp_mapping',
+        name: 'STL CAD Mesh Inverse-Distance Temperature Interpolation',
+        suite: 'Geometry',
+        fn: async () => {
+          const stl = await api.parseSTL(SAMPLE_CUBE_STL);
+          const csv = await api.parseCSV(SAMPLE_CUBE_27_CSV);
+          const mapped = mapTemperatureToSTL({
+            stl,
+            csv,
+          });
+          if (!mapped.success || !mapped.stats) {
+            throw new Error(`Mapping failed: ${mapped.errorMessage}`);
+          }
+          if (mapped.stats.triangleCount !== 12) {
+            throw new Error(`Expected 12 mapped triangles, got ${mapped.stats.triangleCount}`);
+          }
+          return `Successfully interpolated temperatures onto ${mapped.stats.triangleCount} STL triangles, range [${mapped.stats.mappedMinT.toFixed(1)}°C, ${mapped.stats.mappedMaxT.toFixed(1)}°C]`;
         },
       },
       {

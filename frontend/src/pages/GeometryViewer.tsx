@@ -19,15 +19,26 @@ import {
   Sparkles,
   MousePointer,
   CheckCircle2,
+  Sliders,
 } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import type { STLResult, CSVResult, TempNode } from '../types/api';
-
+import {
+  classifyTemperatureDataset,
+  buildStructuredGridMesh,
+  mapTemperatureToSTL,
+  getTemperatureRgb,
+  getTemperatureCss,
+} from '../lib/geometryClassification';
 import {
   SAMPLE_CUBE_STL,
   SAMPLE_CYLINDER_STL,
   SAMPLE_ROD_CSV,
+  SAMPLE_CUBE_27_CSV,
+  SAMPLE_PLATE_2D_CSV,
+  SAMPLE_RECTILINEAR_GRID_CSV,
+  SAMPLE_UNSTRUCTURED_CSV,
   SAMPLE_IRREGULAR_BRACKET_STL,
   SAMPLE_LARGE_MANIFOLD_STL,
   MALFORMED_STL,
@@ -36,52 +47,7 @@ import {
 
 // Visualisation Modes
 export type VisMode = 'solid' | 'faceted' | 'wireframe' | 'temperature';
-
-// ── Temperature Colormap (Continuous 5-Stop Gradient) ────────────────────────
-// 0.00: Deep Blue  (#1D4ED8)
-// 0.25: Cyan       (#06B6D4)
-// 0.50: Emerald    (#10B981)
-// 0.75: Amber      (#F59E0B)
-// 1.00: Crimson    (#EF4444)
-function getTemperatureRgb(tNorm: number): [number, number, number] {
-  const t = Math.max(0, Math.min(1, tNorm));
-  if (t <= 0.25) {
-    const u = t / 0.25;
-    return [
-      (29 + (6 - 29) * u) / 255,
-      (78 + (182 - 78) * u) / 255,
-      (216 + (212 - 216) * u) / 255,
-    ];
-  } else if (t <= 0.5) {
-    const u = (t - 0.25) / 0.25;
-    return [
-      (6 + (16 - 6) * u) / 255,
-      (182 + (185 - 182) * u) / 255,
-      (212 + (129 - 212) * u) / 255,
-    ];
-  } else if (t <= 0.75) {
-    const u = (t - 0.5) / 0.25;
-    return [
-      (16 + (245 - 16) * u) / 255,
-      (185 + (158 - 185) * u) / 255,
-      (129 + (11 - 129) * u) / 255,
-    ];
-  } else {
-    const u = (t - 0.75) / 0.25;
-    return [
-      (245 + (239 - 245) * u) / 255,
-      (158 + (68 - 158) * u) / 255,
-      (11 + (68 - 11) * u) / 255,
-    ];
-  }
-}
-
-// Convert normalized [0,1] t to CSS hex color for UI swatches
-function getTemperatureCss(tNorm: number): string {
-  const [r, g, b] = getTemperatureRgb(tNorm);
-  const h = (v: number) => Math.round(v * 255).toString(16).padStart(2, '0');
-  return `#${h(r)}${h(g)}${h(b)}`;
-}
+export type TempDisplayStyle = 'surface' | 'surface_nodes' | 'nodes_only' | 'wireframe';
 
 // ── STL Mesh Component ───────────────────────────────────────────────────────
 // Converts parsed ASCII STL triangles into coherent Three.js geometry centered at (0, 0, 0).
@@ -90,13 +56,18 @@ function getTemperatureCss(tNorm: number): string {
 //  - Solid: Studio steel-blue CAD shading with creased normals for smooth curved surfaces
 //  - Faceted: Flat facet shading with subtle triangular facet edge lines
 //  - Wireframe: Clean triangle mesh lines without solid occlusion
+//  - Temperature: Continuous temperature-colored CAD mesh when CSV temperature field is mapped
 function STLMesh({
   result,
   mode,
+  mappedGeometry,
+  mappedWireGeometry,
   onBoundsCalculated,
 }: {
   result: STLResult;
   mode: VisMode;
+  mappedGeometry?: THREE.BufferGeometry | null;
+  mappedWireGeometry?: THREE.BufferGeometry | null;
   onBoundsCalculated: (radius: number, dimensions: { dx: number; dy: number; dz: number }) => void;
 }) {
   const { smoothGeometry, facetedGeometry, wireGeometry, dimensions, radius } = useMemo(() => {
@@ -110,30 +81,24 @@ function STLMesh({
     const baseGeom = new THREE.BufferGeometry();
     baseGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
 
-    // Calculate dimensions from original parsed vertices
     baseGeom.computeBoundingBox();
     const bb = baseGeom.boundingBox!;
     const dx = Math.abs(bb.max.x - bb.min.x);
     const dy = Math.abs(bb.max.y - bb.min.y);
     const dz = Math.abs(bb.max.z - bb.min.z);
 
-    // Center geometry so model origin sits at (0, 0, 0)
     baseGeom.center();
     baseGeom.computeBoundingBox();
     baseGeom.computeBoundingSphere();
 
-    const r = baseGeom.boundingSphere?.radius && baseGeom.boundingSphere.radius > 0
-      ? baseGeom.boundingSphere.radius
-      : Math.max(dx, dy, dz) * 0.7 || 1.0;
+    const r =
+      baseGeom.boundingSphere?.radius && baseGeom.boundingSphere.radius > 0
+        ? baseGeom.boundingSphere.radius
+        : Math.max(dx, dy, dz) * 0.7 || 1.0;
 
-    // 1. Smooth CAD geometry: Creased normals preserve sharp edges > 35° while smoothing curves
     const smoothGeom = toCreasedNormals(baseGeom, THREE.MathUtils.degToRad(35));
-
-    // 2. Faceted geometry: Explicit per-triangle flat normals
     const facetedGeom = baseGeom.clone();
     facetedGeom.computeVertexNormals();
-
-    // 3. Wireframe geometry for facet outlines
     const wireGeom = new THREE.WireframeGeometry(baseGeom);
 
     return {
@@ -197,38 +162,65 @@ function STLMesh({
           />
         </mesh>
       )}
+
+      {/* Temperature Mapped Mode: Continuous temperature colors on CAD STL triangles */}
+      {mode === 'temperature' && mappedGeometry && (
+        <group>
+          <mesh geometry={mappedGeometry}>
+            <meshStandardMaterial
+              vertexColors={true}
+              roughness={0.3}
+              metalness={0.15}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {mappedWireGeometry && (
+            <lineSegments geometry={mappedWireGeometry}>
+              <lineBasicMaterial
+                color="#0F172A"
+                transparent
+                opacity={0.25}
+                depthTest={true}
+              />
+            </lineSegments>
+          )}
+        </group>
+      )}
     </group>
   );
 }
 
-// ── Detect if dataset is 1D (all nodes collinear along one axis) ──────────────
-function detect1D(nodes: TempNode[]): boolean {
-  if (nodes.length < 2) return false;
-  const xs = nodes.map((n) => n.x);
-  const ys = nodes.map((n) => n.y);
-  const zs = nodes.map((n) => n.z);
-  const spanX = Math.max(...xs) - Math.min(...xs);
-  const spanY = Math.max(...ys) - Math.min(...ys);
-  const spanZ = Math.max(...zs) - Math.min(...zs);
-  const maxSpan = Math.max(spanX, spanY, spanZ);
-  if (maxSpan < 1e-10) return false;
-  const secondSpan = [spanX, spanY, spanZ].sort((a, b) => b - a)[1];
-  return secondSpan < maxSpan * 0.02;
-}
-
-// ── Temperature Point Cloud Component ───────────────────────────────────────
-function TempPointCloud({
+// ── Scientific Temperature Field Visualizer ─────────────────────────────────
+// Intelligently renders:
+//  - 3D/2D Structured Grids: continuous boundary surface quads/triangles + optional nodes/wireframe
+//  - 1D Collinear Beam: analytical continuity spine line + nodal markers
+//  - Unstructured Point Cloud: faithful measurement points without fabricating false solid geometry
+function ScientificTemperatureView({
   data,
+  displayStyle,
   selectedId,
   onSelect,
   onBoundsCalculated,
 }: {
   data: CSVResult;
+  displayStyle: TempDisplayStyle;
   selectedId: number | null;
   onSelect: (node: TempNode | null) => void;
   onBoundsCalculated: (radius: number, dimensions: { dx: number; dy: number; dz: number }) => void;
 }) {
-  const { geometry, lineGeometry, radius, selectedPos, dimensions, is1D } = useMemo(() => {
+  const classificationReport = useMemo(() => {
+    return classifyTemperatureDataset(data.nodes);
+  }, [data]);
+
+  const {
+    pointsGeometry,
+    structuredMesh,
+    lineGeometry,
+    radius,
+    selectedPos,
+    dimensions,
+    center,
+  } = useMemo(() => {
     const xs = data.nodes.map((n) => n.x);
     const ys = data.nodes.map((n) => n.y);
     const zs = data.nodes.map((n) => n.z);
@@ -251,7 +243,7 @@ function TempPointCloud({
     const tMax = data.T_max;
     const tRange = tMax - tMin || 1;
 
-    // Sort by node id for stable connectivity line
+    // Stable sort by id
     const sorted = [...data.nodes].sort((a, b) => a.id - b.id);
 
     const pos: number[] = [];
@@ -273,73 +265,114 @@ function TempPointCloud({
       }
     }
 
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geom.computeBoundingSphere();
+    const pGeom = new THREE.BufferGeometry();
+    pGeom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    pGeom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    pGeom.computeBoundingSphere();
 
-    // Line geometry for 1D spine
-    const lineGeom = new THREE.BufferGeometry();
-    lineGeom.setAttribute('position', new THREE.Float32BufferAttribute([...pos], 3));
+    // Line geometry for 1D datasets
+    const lGeom = new THREE.BufferGeometry();
+    lGeom.setAttribute('position', new THREE.Float32BufferAttribute([...pos], 3));
     const lineIndices: number[] = [];
     for (let i = 0; i < sorted.length - 1; i++) lineIndices.push(i, i + 1);
-    lineGeom.setIndex(lineIndices);
+    lGeom.setIndex(lineIndices);
+
+    // Build structured mesh for 3D/2D grids
+    let sMesh: { surfaceGeometry: THREE.BufferGeometry; wireGeometry: THREE.BufferGeometry } | null = null;
+    if (
+      classificationReport.gridInfo &&
+      (classificationReport.type === 'structured_3d' || classificationReport.type === 'structured_2d')
+    ) {
+      sMesh = buildStructuredGridMesh({
+        gridInfo: classificationReport.gridInfo,
+        tMin,
+        tMax,
+        center: [cx, cy, cz],
+      });
+    }
 
     return {
-      geometry: geom,
-      lineGeometry: lineGeom,
+      pointsGeometry: pGeom,
+      structuredMesh: sMesh,
+      lineGeometry: lGeom,
       radius: rad,
       selectedPos: selP,
       dimensions: { dx: spanX, dy: spanY, dz: spanZ },
-      is1D: detect1D(data.nodes),
+      center: [cx, cy, cz] as [number, number, number],
     };
-  }, [data, selectedId]);
+  }, [data, selectedId, classificationReport]);
 
   useEffect(() => {
     onBoundsCalculated(radius, dimensions);
   }, [radius, dimensions, onBoundsCalculated]);
 
-  // Larger, proportionally-scaled points — always clearly visible
   const pointSize = Math.max(radius * 0.045, 0.04);
+  const is1D = classificationReport.type === 'structured_1d';
+  const hasStructuredMesh = !!structuredMesh;
 
   return (
     <group>
-      {/* Connectivity spine for ordered 1D datasets */}
-      {is1D && (
-        <lineSegments geometry={lineGeometry}>
-          <lineBasicMaterial color="#475569" transparent opacity={0.55} />
+      {/* 1. Continuous Surface for Structured 3D/2D Grids */}
+      {hasStructuredMesh && (displayStyle === 'surface' || displayStyle === 'surface_nodes') && (
+        <mesh geometry={structuredMesh.surfaceGeometry}>
+          <meshStandardMaterial
+            vertexColors={true}
+            roughness={0.35}
+            metalness={0.12}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* 2. Structured Cell Outlines (Wireframe / Grid style) */}
+      {hasStructuredMesh && (displayStyle === 'wireframe' || displayStyle === 'surface') && (
+        <lineSegments geometry={structuredMesh.wireGeometry}>
+          <lineBasicMaterial
+            color="#0F172A"
+            transparent
+            opacity={displayStyle === 'wireframe' ? 0.85 : 0.3}
+          />
         </lineSegments>
       )}
 
-      {/* Main colored point cloud */}
-      <points
-        geometry={geometry}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (e.index !== undefined && data.nodes[e.index]) {
-            onSelect(data.nodes[e.index]);
-          }
-        }}
-      >
-        <pointsMaterial
-          size={pointSize}
-          vertexColors
-          sizeAttenuation
-          transparent
-          opacity={0.97}
-        />
-      </points>
+      {/* 3. 1D Continuity Spine */}
+      {is1D && (
+        <lineSegments geometry={lineGeometry}>
+          <lineBasicMaterial color="#38BDF8" transparent opacity={0.75} linewidth={2} />
+        </lineSegments>
+      )}
 
-      {/* Selected node: compact filled gold sphere + subtle outer halo */}
+      {/* 4. Verified Measurement Points (Nodes) */}
+      {(displayStyle === 'nodes_only' || displayStyle === 'surface_nodes' || !hasStructuredMesh) && (
+        <points
+          geometry={pointsGeometry}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (e.index !== undefined && data.nodes[e.index]) {
+              onSelect(data.nodes[e.index]);
+            }
+          }}
+        >
+          <pointsMaterial
+            size={pointSize}
+            vertexColors
+            sizeAttenuation
+            transparent
+            opacity={0.96}
+          />
+        </points>
+      )}
+
+      {/* 5. Selected Node Highlight Indicator */}
       {selectedPos && (
         <group position={selectedPos}>
           <mesh>
-            <sphereGeometry args={[pointSize * 1.1, 12, 12]} />
+            <sphereGeometry args={[pointSize * 1.05, 16, 16]} />
             <meshBasicMaterial color="#FBBF24" />
           </mesh>
           <mesh>
-            <sphereGeometry args={[pointSize * 2.0, 16, 16]} />
-            <meshBasicMaterial color="#FBBF24" transparent opacity={0.18} />
+            <sphereGeometry args={[pointSize * 1.85, 20, 20]} />
+            <meshBasicMaterial color="#FBBF24" transparent opacity={0.22} />
           </mesh>
         </group>
       )}
@@ -347,14 +380,12 @@ function TempPointCloud({
   );
 }
 
-// ── Consistent XYZ World Axis Helper with Readable Visual Labels ────────────
-// X = Red, Y = Green, Z = Blue (Height)
+// ── World Axes Helper ────────────────────────────────────────────────────────
 function WorldAxes({ length }: { length: number }) {
   const l = Math.max(length, 0.6);
   return (
     <group>
       <axesHelper args={[l]} />
-      {/* Readable axis tips positioned at positive extents */}
       <Html position={[l * 1.08, 0, 0]} center style={{ pointerEvents: 'none' }}>
         <span
           style={{
@@ -407,10 +438,7 @@ function WorldAxes({ length }: { length: number }) {
   );
 }
 
-// ── Smart Camera & OrbitControls Controller (Z-Up Engineering Isometric) ────
-// Sets camera.up = (0, 0, 1), fits camera to bounding sphere with comfortable padding.
-// Re-centers and fits on initial load, model change, or explicit Reset View.
-// Changing colour/shading mode preserves the current camera orientation and position.
+// ── Smart Camera & OrbitControls Controller (Z-Up Isometric) ────────────────
 function CameraController({
   radius,
   fitTrigger,
@@ -427,20 +455,18 @@ function CameraController({
 
     const r = Math.max(radius, 0.1);
     const aspect = size.width / Math.max(1, size.height);
-    const fovV = 45; // vertical fov degrees
+    const fovV = 45;
     const fovVRad = (fovV * Math.PI) / 180;
     const fovHRad = 2 * Math.atan(Math.tan(fovVRad / 2) * aspect);
     const minFovHalf = Math.min(fovVRad, fovHRad) / 2;
 
-    // Camera distance with 35% margin to prevent any clipping or edge proximity
     const fitDistance = (r / Math.sin(minFovHalf)) * 1.35;
 
     const persp = camera as THREE.PerspectiveCamera;
-    persp.up.set(0, 0, 1); // Z is vertical height in CAD world
+    persp.up.set(0, 0, 1);
     persp.near = Math.max(0.001, fitDistance / 200);
     persp.far = Math.max(2000, fitDistance * 50);
 
-    // Engineering Isometric View Direction in Z-Up: (+X, -Y, +Z) looking at (0, 0, 0)
     const viewDir = new THREE.Vector3(1.1, -1.2, 0.95).normalize();
     persp.position.copy(viewDir.multiplyScalar(fitDistance));
     persp.lookAt(0, 0, 0);
@@ -456,92 +482,134 @@ function CameraController({
   return null;
 }
 
-// ── Professional Temperature Legend Panel (viewport overlay) ──────────────────
+// ── Professional Temperature Legend Panel ───────────────────────────────────
 function TempLegend({
   tMin,
   tMax,
   selectedT,
   nodeCount,
+  classificationTitle,
+  badgeColor,
 }: {
   tMin: number;
   tMax: number;
   selectedT: number | null;
   nodeCount: number;
+  classificationTitle: string;
+  badgeColor: string;
 }) {
   const tRange = tMax - tMin || 1;
-  const midLow = tMin + tRange * 0.25;
-  const mid    = tMin + tRange * 0.5;
-  const midHigh = tMin + tRange * 0.75;
+  const p20 = tMin + tRange * 0.2;
+  const p40 = tMin + tRange * 0.4;
+  const p60 = tMin + tRange * 0.6;
+  const p80 = tMin + tRange * 0.8;
   const markerPct = selectedT !== null ? ((selectedT - tMin) / tRange) * 100 : null;
   const mono: React.CSSProperties = { fontFamily: 'monospace', whiteSpace: 'nowrap' };
 
   return (
     <div
       style={{
-        position: 'absolute', bottom: 14, right: 14, zIndex: 10,
-        background: 'rgba(7, 12, 22, 0.90)',
-        border: '1px solid rgba(51,65,85,0.7)',
-        borderRadius: 8, padding: '10px 12px',
-        backdropFilter: 'blur(10px)', minWidth: 168,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.55)',
+        position: 'absolute',
+        bottom: 14,
+        right: 14,
+        zIndex: 10,
+        background: 'rgba(7, 12, 22, 0.92)',
+        border: '1px solid rgba(51, 65, 85, 0.75)',
+        borderRadius: 8,
+        padding: '10px 14px',
+        backdropFilter: 'blur(10px)',
+        minWidth: 190,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
       }}
     >
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-        <Thermometer size={12} style={{ color: '#F59E0B' }} />
-        <span style={{ fontSize: 10.5, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-          Temperature Field
+      {/* Header with Classification badge */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Thermometer size={12} style={{ color: '#F59E0B' }} />
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: '#CBD5E1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Thermal Colormap
+          </span>
+        </div>
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 700,
+            padding: '1px 6px',
+            borderRadius: 4,
+            background: `${badgeColor}22`,
+            border: `1px solid ${badgeColor}66`,
+            color: badgeColor,
+          }}
+        >
+          °C
         </span>
       </div>
 
-      {/* Gradient bar + marker */}
+      <div style={{ fontSize: 10, color: '#94A3B8', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {classificationTitle}
+      </div>
+
+      {/* Continuous 6-stop gradient bar */}
       <div style={{ position: 'relative', marginBottom: 4 }}>
-        <div style={{
-          height: 14, borderRadius: 4,
-          background: 'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 25%, #10B981 50%, #F59E0B 75%, #EF4444 100%)',
-          boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
-        }} />
+        <div
+          style={{
+            height: 14,
+            borderRadius: 4,
+            background: 'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 20%, #10B981 40%, #FBBF24 60%, #F97316 80%, #EF4444 100%)',
+            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
+          }}
+        />
         {markerPct !== null && (
-          <div style={{
-            position: 'absolute', top: -3,
-            left: `${Math.min(Math.max(markerPct, 1), 99)}%`,
-            transform: 'translateX(-50%)',
-            width: 3, height: 20,
-            background: '#FBBF24', borderRadius: 2,
-            boxShadow: '0 0 6px rgba(251,191,36,0.9)',
-          }} />
+          <div
+            style={{
+              position: 'absolute',
+              top: -3,
+              left: `${Math.min(Math.max(markerPct, 1), 99)}%`,
+              transform: 'translateX(-50%)',
+              width: 3,
+              height: 20,
+              background: '#FBBF24',
+              borderRadius: 2,
+              boxShadow: '0 0 6px rgba(251,191,36,0.95)',
+            }}
+          />
         )}
       </div>
 
       {/* Tick labels */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-        <span style={{ ...mono, fontSize: 9.5, color: '#93C5FD' }}>{tMin.toFixed(1)}</span>
-        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{midLow.toFixed(1)}</span>
-        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{mid.toFixed(1)}</span>
-        <span style={{ ...mono, fontSize: 9.5, color: '#94A3B8' }}>{midHigh.toFixed(1)}</span>
-        <span style={{ ...mono, fontSize: 9.5, color: '#FCA5A5' }}>{tMax.toFixed(1)}</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, fontSize: 9 }}>
+        <span style={{ ...mono, color: '#93C5FD' }}>{tMin.toFixed(1)}</span>
+        <span style={{ ...mono, color: '#94A3B8' }}>{p20.toFixed(1)}</span>
+        <span style={{ ...mono, color: '#94A3B8' }}>{p40.toFixed(1)}</span>
+        <span style={{ ...mono, color: '#94A3B8' }}>{p60.toFixed(1)}</span>
+        <span style={{ ...mono, color: '#94A3B8' }}>{p80.toFixed(1)}</span>
+        <span style={{ ...mono, color: '#FCA5A5' }}>{tMax.toFixed(1)}</span>
       </div>
-      <div style={{ textAlign: 'center', fontSize: 9, color: '#475569', marginBottom: 6 }}>°C</div>
 
-      <div style={{ borderTop: '1px solid rgba(51,65,85,0.5)', marginBottom: 6 }} />
+      <div style={{ borderTop: '1px solid rgba(51,65,85,0.5)', margin: '6px 0' }} />
 
       {/* Stats */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 10, color: '#64748B' }}>Nodes</span>
-          <span style={{ ...mono, fontSize: 10, color: '#94A3B8', fontWeight: 600 }}>{nodeCount}</span>
+          <span style={{ ...mono, fontSize: 10, color: '#CBD5E1', fontWeight: 600 }}>{nodeCount}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 10, color: '#64748B' }}>Range</span>
-          <span style={{ ...mono, fontSize: 10, color: '#94A3B8' }}>{(tMax - tMin).toFixed(1)} °C</span>
+          <span style={{ ...mono, fontSize: 10, color: '#CBD5E1' }}>{(tMax - tMin).toFixed(1)} °C</span>
         </div>
         {selectedT !== null && (
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', marginTop: 2,
-            padding: '3px 6px',
-            background: 'rgba(251,191,36,0.08)', borderRadius: 4,
-            border: '1px solid rgba(251,191,36,0.25)',
-          }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: 2,
+              padding: '3px 6px',
+              background: 'rgba(251,191,36,0.08)',
+              borderRadius: 4,
+              border: '1px solid rgba(251,191,36,0.25)',
+            }}
+          >
             <span style={{ fontSize: 10, color: '#D97706' }}>Selected</span>
             <span style={{ ...mono, fontSize: 10, fontWeight: 700, color: '#FBBF24' }}>
               {selectedT.toFixed(2)} °C
@@ -557,14 +625,14 @@ function TempLegend({
 export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const [stlResult, setStlResult] = useState<STLResult | null>(null);
   const [csvResult, setCsvResult] = useState<CSVResult | null>(null);
-  const [activeMode, setActiveMode] = useState<'none' | 'stl' | 'csv'>('none');
+  const [activeMode, setActiveMode] = useState<'none' | 'stl' | 'csv' | 'stl_temp'>('none');
   const [visMode, setVisMode] = useState<VisMode>('solid');
+  const [tempDisplayStyle, setTempDisplayStyle] = useState<TempDisplayStyle>('surface');
   const [selectedNode, setSelectedNode] = useState<TempNode | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const { cssVar } = useTheme();
-
 
   // Model bounding dimensions and camera fit trigger
   const [modelRadius, setModelRadius] = useState<number>(1.0);
@@ -590,129 +658,224 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
     setFitTrigger((t) => t + 1);
   }, []);
 
+  // Scientific classification of current CSV dataset
+  const classificationReport = useMemo(() => {
+    if (!csvResult) return null;
+    return classifyTemperatureDataset(csvResult.nodes);
+  }, [csvResult]);
+
+  // Interpolated Temperature mapping on STL
+  const stlTemperatureMapping = useMemo(() => {
+    if (!stlResult || !csvResult) return null;
+    return mapTemperatureToSTL({ stl: stlResult, csv: csvResult });
+  }, [stlResult, csvResult]);
+
+  // Adjust default display style based on dataset type
+  useEffect(() => {
+    if (!classificationReport) return;
+    if (classificationReport.type === 'unstructured_cloud') {
+      setTempDisplayStyle('nodes_only');
+    } else if (classificationReport.type === 'structured_1d') {
+      setTempDisplayStyle('surface_nodes');
+    } else {
+      setTempDisplayStyle('surface');
+    }
+  }, [classificationReport]);
+
   // Process File Upload
-  const handleFile = useCallback(async (file: File) => {
-    setError(null);
-    setNotice(null);
+  const handleFile = useCallback(
+    async (file: File) => {
+      setError(null);
+      setNotice(null);
 
-    const name = file.name.toLowerCase();
-    const isSTL = name.endsWith('.stl');
-    const isCSV = name.endsWith('.csv');
+      const name = file.name.toLowerCase();
+      const isSTL = name.endsWith('.stl');
+      const isCSV = name.endsWith('.csv');
 
-    if (!isSTL && !isCSV) {
-      setError('Unsupported format. Please select an ASCII .stl or .csv file.');
-      return;
-    }
-
-    if (file.size === 0) {
-      setError('The selected file is empty (0 bytes).');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const text = await file.text();
-      const trimmed = text.trim();
-      if (!trimmed) {
-        throw new Error('File contains no readable text.');
+      if (!isSTL && !isCSV) {
+        setError('Unsupported format. Please select an ASCII .stl or .csv file.');
+        return;
       }
 
-      if (isSTL) {
-        if (!trimmed.includes('solid') || !trimmed.includes('vertex')) {
-          throw new Error(
-            'Malformed ASCII STL: file must contain "solid", "facet", and "vertex" definitions.'
-          );
-        }
-        const r = await api.parseSTL(text);
-        if (!r.triangles || r.triangles.length === 0) {
-          throw new Error('STL file contains no valid triangles.');
-        }
-        setStlResult(r);
-        setCsvResult(null);
-        setActiveMode('stl');
-        setVisMode('solid');
-        setSelectedNode(null);
-        setFitTrigger((t) => t + 1);
-      } else {
-        if (!trimmed.includes('node_id') || !trimmed.includes(',')) {
-          throw new Error(
-            'Malformed CSV: header must specify node_id,x_m,y_m,z_m,temperature_C'
-          );
-        }
-        const r = await api.parseCSV(text);
-        if (!r.nodes || r.nodes.length === 0) {
-          throw new Error('CSV file contains no valid data rows.');
-        }
-        setCsvResult(r);
-        setStlResult(null);
-        setActiveMode('csv');
-        setVisMode('temperature');
-        setSelectedNode(null);
-        setFitTrigger((t) => t + 1);
+      if (file.size === 0) {
+        setError('The selected file is empty (0 bytes).');
+        return;
       }
-    } catch (e) {
-      // Keep last successfully loaded model visible on error
-      setError(
-        e instanceof ApiError
-          ? e.message
-          : e instanceof Error
-          ? e.message
-          : 'Failed to parse file.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+
+      setLoading(true);
+
+      try {
+        const text = await file.text();
+        const trimmed = text.trim();
+        if (!trimmed) {
+          throw new Error('File contains no readable text.');
+        }
+
+        if (isSTL) {
+          if (!trimmed.includes('solid') || !trimmed.includes('vertex')) {
+            throw new Error(
+              'Malformed ASCII STL: file must contain "solid", "facet", and "vertex" definitions.'
+            );
+          }
+          const r = await api.parseSTL(text);
+          if (!r.triangles || r.triangles.length === 0) {
+            throw new Error('STL file contains no valid triangles.');
+          }
+          setStlResult(r);
+          setActiveMode('stl');
+          setVisMode('solid');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+
+          if (csvResult) {
+            setNotice(
+              `STL mesh "${r.name || 'model'}" loaded. Compatible temperature CSV is already loaded — switch to "Temp" mode to view mapped temperature field.`
+            );
+          }
+        } else {
+          if (!trimmed.includes('node_id') || !trimmed.includes(',')) {
+            throw new Error(
+              'Malformed CSV: header must specify node_id,x_m,y_m,z_m,temperature_C'
+            );
+          }
+          const r = await api.parseCSV(text);
+          if (!r.nodes || r.nodes.length === 0) {
+            throw new Error('CSV file contains no valid data rows.');
+          }
+          setCsvResult(r);
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+
+          if (stlResult) {
+            // Check mapping compatibility
+            const mappingCheck = mapTemperatureToSTL({ stl: stlResult, csv: r });
+            if (mappingCheck.success) {
+              setActiveMode('stl_temp');
+              setVisMode('temperature');
+              setNotice(
+                `Temperature CSV (${r.node_count} nodes) mapped onto STL mesh "${stlResult.name}". Viewing mapped temperature colormap.`
+              );
+            } else {
+              setActiveMode('csv');
+              setNotice(
+                `CSV loaded in point/grid mode. STL mapping notice: ${mappingCheck.errorMessage}`
+              );
+            }
+          } else {
+            setActiveMode('csv');
+            setVisMode('temperature');
+          }
+        }
+      } catch (e) {
+        setError(
+          e instanceof ApiError
+            ? e.message
+            : e instanceof Error
+            ? e.message
+            : 'Failed to parse file.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [stlResult, csvResult]
+  );
 
   // Load Built-in Engineering Samples
   const loadSample = useCallback(
-    async (type: 'cube' | 'cylinder' | 'bracket' | 'large' | 'csv' | 'bad_stl' | 'bad_csv') => {
+    async (
+      type:
+        | 'cube_stl'
+        | 'cylinder_stl'
+        | 'bracket_stl'
+        | 'large_stl'
+        | 'cube_27_csv'
+        | 'rod_1d_csv'
+        | 'plate_2d_csv'
+        | 'rect_grid_csv'
+        | 'unstructured_csv'
+        | 'hybrid_cube_temp'
+        | 'bad_stl'
+        | 'bad_csv'
+    ) => {
       setError(null);
       setNotice(null);
       setLoading(true);
 
       try {
-        if (type === 'cube') {
+        if (type === 'cube_stl') {
           const r = await api.parseSTL(SAMPLE_CUBE_STL);
           setStlResult(r);
-          setCsvResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
-        } else if (type === 'cylinder') {
+        } else if (type === 'cylinder_stl') {
           const r = await api.parseSTL(SAMPLE_CYLINDER_STL);
           setStlResult(r);
-          setCsvResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
-        } else if (type === 'bracket') {
+        } else if (type === 'bracket_stl') {
           const r = await api.parseSTL(SAMPLE_IRREGULAR_BRACKET_STL);
           setStlResult(r);
-          setCsvResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
-        } else if (type === 'large') {
+        } else if (type === 'large_stl') {
           const r = await api.parseSTL(SAMPLE_LARGE_MANIFOLD_STL);
           setStlResult(r);
-          setCsvResult(null);
           setActiveMode('stl');
           setVisMode('solid');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
-        } else if (type === 'csv') {
-          const r = await api.parseCSV(SAMPLE_ROD_CSV);
+        } else if (type === 'cube_27_csv') {
+          const r = await api.parseCSV(SAMPLE_CUBE_27_CSV);
           setCsvResult(r);
-          setStlResult(null);
           setActiveMode('csv');
           setVisMode('temperature');
           setSelectedNode(null);
           setFitTrigger((t) => t + 1);
+        } else if (type === 'rod_1d_csv') {
+          const r = await api.parseCSV(SAMPLE_ROD_CSV);
+          setCsvResult(r);
+          setActiveMode('csv');
+          setVisMode('temperature');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+        } else if (type === 'plate_2d_csv') {
+          const r = await api.parseCSV(SAMPLE_PLATE_2D_CSV);
+          setCsvResult(r);
+          setActiveMode('csv');
+          setVisMode('temperature');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+        } else if (type === 'rect_grid_csv') {
+          const r = await api.parseCSV(SAMPLE_RECTILINEAR_GRID_CSV);
+          setCsvResult(r);
+          setActiveMode('csv');
+          setVisMode('temperature');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+        } else if (type === 'unstructured_csv') {
+          const r = await api.parseCSV(SAMPLE_UNSTRUCTURED_CSV);
+          setCsvResult(r);
+          setActiveMode('csv');
+          setVisMode('temperature');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+        } else if (type === 'hybrid_cube_temp') {
+          const rStl = await api.parseSTL(SAMPLE_CUBE_STL);
+          const rCsv = await api.parseCSV(SAMPLE_CUBE_27_CSV);
+          setStlResult(rStl);
+          setCsvResult(rCsv);
+          setActiveMode('stl_temp');
+          setVisMode('temperature');
+          setSelectedNode(null);
+          setFitTrigger((t) => t + 1);
+          setNotice('Mapped 27-node 3D steady-state thermal field onto Unit Cube CAD mesh.');
         } else if (type === 'bad_stl') {
           await api.parseSTL(MALFORMED_STL);
         } else if (type === 'bad_csv') {
@@ -744,7 +907,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
   const groundZ = -Math.max(modelDimensions.dz / 2, modelRadius * 0.5);
   const gridSize = Math.max(2, Math.ceil(modelRadius * 2.8));
 
-  // CSS hex color of the selected node, used by the inspection panel swatch
+  // CSS hex color of the selected node
   const selectedNodeColor = useMemo(() => {
     if (!selectedNode || !csvResult) return null;
     const tRange = csvResult.T_max - csvResult.T_min || 1;
@@ -758,7 +921,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         <div>
           <h1 className="page-title">Geometry Viewer</h1>
           <p className="page-subtitle">
-            Interactive 3D CAD visualization with consistent Z-up world coordinates, multi-mode shading, and scalar temperature fields
+            Scientific 3D CAD visualization with intelligent structured grid extraction, scalar temperature colormapping, and STL mesh mapping
           </p>
         </div>
       </div>
@@ -778,7 +941,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               style={{
                 border: '2px dashed var(--border)',
                 borderRadius: 'var(--radius)',
-                padding: '22px 16px',
+                padding: '20px 14px',
                 textAlign: 'center',
                 cursor: 'pointer',
                 marginBottom: 14,
@@ -797,7 +960,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                 onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
               <Upload
-                size={24}
+                size={22}
                 style={{
                   margin: '0 auto 6px',
                   color: 'var(--primary-blue)',
@@ -805,31 +968,23 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                 }}
               />
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>
-                Choose file or drag & drop
+                Import STL Mesh or Temperature CSV
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                ASCII STL meshes (.stl) or temperature datasets (.csv)
+                Auto-classifies structured grids, point clouds & CAD models
               </div>
             </div>
 
             {/* Quick Sample Load Buttons */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  marginBottom: 2,
-                }}
-              >
-                Preloaded Datasets
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* CAD STL Section */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                CAD Geometries (STL)
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => loadSample('cube')}
+                  onClick={() => loadSample('cube_stl')}
                   disabled={loading}
                   title="Unit Cube (12 triangles, 1m × 1m × 1m)"
                 >
@@ -837,7 +992,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => loadSample('cylinder')}
+                  onClick={() => loadSample('cylinder_stl')}
                   disabled={loading}
                   title="Curved Cylinder Manifold (96 triangles)"
                 >
@@ -847,43 +1002,89 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => loadSample('bracket')}
+                  onClick={() => loadSample('bracket_stl')}
                   disabled={loading}
-                  title="Asymmetric L-bracket irregular geometry (20 triangles)"
+                  title="Asymmetric L-bracket irregular geometry"
                 >
                   <Grid size={13} /> Irregular STL
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => loadSample('large')}
+                  onClick={() => loadSample('large_stl')}
                   disabled={loading}
                   title="High-density manifold (440 triangles)"
                 >
                   <Sparkles size={13} /> Large STL
                 </button>
               </div>
+
+              {/* Temperature Datasets Section */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>
+                Temperature Fields (CSV)
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('cube_27_csv')}
+                  disabled={loading}
+                  title="3D Structured Cube Grid (27 nodes: 3×3×3)"
+                >
+                  <Box size={13} /> 3D Cube (27 pts)
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('rod_1d_csv')}
+                  disabled={loading}
+                  title="1D Collinear Analytical Rod (21 nodes)"
+                >
+                  <Sliders size={13} /> 1D Rod (21 pts)
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('plate_2d_csv')}
+                  disabled={loading}
+                  title="2D Planar Structured Heat Plate (5×4 = 20 nodes)"
+                >
+                  <Grid size={13} /> 2D Plate (20 pts)
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => loadSample('rect_grid_csv')}
+                  disabled={loading}
+                  title="Non-Cubic Non-Uniform 3D Grid (4×3×2, -36°C)"
+                >
+                  <Box size={13} /> Rectilinear 3D
+                </button>
+              </div>
               <button
                 className="btn btn-secondary btn-sm"
-                onClick={() => loadSample('csv')}
+                onClick={() => loadSample('unstructured_csv')}
                 disabled={loading}
-                title="Synthetic 1D Rod with analytical heat solution (21 nodes)"
+                title="Unstructured Point Cloud (14 scattered sensors without grid connectivity)"
                 style={{ width: '100%' }}
               >
-                <Thermometer size={13} /> Sample Temperature CSV
+                <MousePointer size={13} /> Unstructured Cloud (14 pts)
               </button>
 
-              {/* Negative Test Buttons */}
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  color: 'var(--text-muted)',
-                  marginTop: 6,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
+              {/* Hybrid CAD + Thermal Mapping */}
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>
+                CAD + Simulation Mapping
+              </div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => loadSample('hybrid_cube_temp')}
+                disabled={loading}
+                title="Map 27-node temperature field directly onto Unit Cube STL mesh"
+                style={{ width: '100%', background: 'linear-gradient(135deg, #1D4ED8 0%, #2563EB 100%)' }}
               >
-                Negative Test Validation
+                <Thermometer size={13} /> Map Temp on Cube STL
+              </button>
+
+              {/* Negative Test Validation */}
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Negative Tests
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
@@ -917,13 +1118,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               </div>
               <button
                 onClick={() => setError(null)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'inherit',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
               >
                 <X size={14} />
               </button>
@@ -944,17 +1139,11 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             >
               <Info size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--primary-blue)' }} />
               <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5 }}>
-                <strong>Temperature View:</strong> {notice}
+                <strong>Notice:</strong> {notice}
               </div>
               <button
                 onClick={() => setNotice(null)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'inherit',
-                  cursor: 'pointer',
-                  padding: 0,
-                }}
+                style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
               >
                 <X size={14} />
               </button>
@@ -963,148 +1152,103 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
 
           {loading && (
             <div className="alert alert-warning" style={{ fontSize: 12.5 }}>
-              Processing dataset in C++ numerical engine…
+              Processing dataset in numerical engine…
             </div>
           )}
 
-          {/* STL Mesh Details Card */}
-          {stlResult && activeMode === 'stl' && (
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">
-                  <Info size={16} /> STL Mesh Details
-                </span>
-                <span className="badge badge-blue">3D CAD Solid</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="form-label" style={{ margin: 0 }}>
-                    Model Name
-                  </span>
-                  <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
-                    {stlResult.name || 'unnamed_solid'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="form-label" style={{ margin: 0 }}>
-                    Triangle Facets
-                  </span>
-                  <span style={{ fontWeight: 600, color: 'var(--primary-blue)' }}>
-                    {stlResult.triangle_count.toLocaleString()}
-                  </span>
-                </div>
-                <div>
-                  <span className="form-label">Dimensions (L × W × H)</span>
-                  <div className="mono" style={{ fontSize: 12, color: 'var(--text-main)' }}>
-                    {modelDimensions.dx.toFixed(3)}m × {modelDimensions.dy.toFixed(3)}m ×{' '}
-                    {modelDimensions.dz.toFixed(3)}m
-                  </div>
-                </div>
-                <div>
-                  <span className="form-label">Original Bounds (World Space)</span>
-                  <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                    Min: [{stlResult.bounds.min.map((v) => v.toFixed(3)).join(', ')}]<br />
-                    Max: [{stlResult.bounds.max.map((v) => v.toFixed(3)).join(', ')}]<br />
-                    Center: [{stlResult.bounds.center.map((v) => v.toFixed(3)).join(', ')}]
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="form-label" style={{ margin: 0 }}>
-                    Scalar Temperature Field
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 8px', borderRadius: 4 }}>
-                    None (Geometry Only)
-                  </span>
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', background: 'rgba(59, 130, 246, 0.06)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', lineHeight: 1.5 }}>
-                  💡 <strong>Why Temperature Mode is Disabled:</strong> Standard ASCII STL meshes contain 3D surface geometry only (vertices and facet normals). Per scientific integrity requirements, temperatures are never invented for pure STL meshes. To view the continuous temperature colormap, import an analytical/ANSYS temperature CSV or click <strong>Sample Temperature CSV</strong> above.
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-                  Centered at origin (0, 0, 0) for viewport viewing without modifying original coordinates.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* CSV Temperature Field Card – Professional Layout */}
-          {csvResult && activeMode === 'csv' && (
+          {/* Classification & Structure Info Card (When CSV or Hybrid is active) */}
+          {csvResult && classificationReport && (
             <div className="card">
               <div className="card-header">
                 <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Thermometer size={16} style={{ color: '#F59E0B' }} />
-                  Temperature Field
+                  {activeMode === 'stl_temp' ? 'Mapped CAD Thermal Model' : 'Dataset Classification'}
                 </span>
-                <button className="btn btn-outline btn-sm" onClick={downloadCSV} title="Export parsed CSV">
-                  <Download size={13} /> Export
-                </button>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background: `${classificationReport.badgeColor}22`,
+                    border: `1px solid ${classificationReport.badgeColor}77`,
+                    color: classificationReport.badgeColor,
+                  }}
+                >
+                  {classificationReport.badgeLabel}
+                </span>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
-
-                {/* Summary stat tiles */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(51,65,85,0.6)', borderRadius: 6, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 10, color: '#64748B', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Nodes</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: '#E2E8F0', fontFamily: 'monospace' }}>{csvResult.node_count}</div>
-                  </div>
-                  <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(51,65,85,0.6)', borderRadius: 6, padding: '8px 10px' }}>
-                    <div style={{ fontSize: 10, color: '#64748B', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Range</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#E2E8F0', fontFamily: 'monospace' }}>{(csvResult.T_max - csvResult.T_min).toFixed(1)} °C</div>
-                  </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }}>
+                <div style={{ color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  {classificationReport.description}
                 </div>
 
-                {/* T min/max bounds */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, color: '#93C5FD', fontFamily: 'monospace', fontWeight: 600 }}>{csvResult.T_min.toFixed(2)} °C</span>
-                  <span style={{ fontSize: 10, color: '#475569' }}>T_min → T_max</span>
-                  <span style={{ fontSize: 11, color: '#FCA5A5', fontFamily: 'monospace', fontWeight: 600 }}>{csvResult.T_max.toFixed(2)} °C</span>
-                </div>
+                {/* Grid details if structured */}
+                {classificationReport.gridInfo && (
+                  <div
+                    style={{
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      padding: '8px 10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Grid Dimensions:</span>
+                      <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                        {classificationReport.gridInfo.dims.join(' × ')}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Grid Spacing:</span>
+                      <span style={{ color: 'var(--text-main)' }}>
+                        {classificationReport.gridInfo.isUniformSpacing ? 'Uniform' : 'Non-Uniform'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Temperature Range:</span>
+                      <span className="mono" style={{ color: '#93C5FD' }}>
+                        {csvResult.T_min.toFixed(1)}°C → {csvResult.T_max.toFixed(1)}°C
+                      </span>
+                    </div>
+                  </div>
+                )}
 
-                {/* Colormap bar with optional selected-node marker */}
-                <div>
-                  <div style={{ position: 'relative', marginBottom: 4 }}>
-                    <div style={{
-                      height: 12, borderRadius: 4,
-                      background: 'linear-gradient(90deg, #1D4ED8 0%, #06B6D4 25%, #10B981 50%, #F59E0B 75%, #EF4444 100%)',
-                      boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.4)',
-                    }} />
-                    {selectedNode && (() => {
-                      const r = csvResult.T_max - csvResult.T_min || 1;
-                      const pct = ((selectedNode.T - csvResult.T_min) / r) * 100;
-                      return (
-                        <div style={{
-                          position: 'absolute', top: -2,
-                          left: `${Math.min(Math.max(pct, 1), 99)}%`,
-                          transform: 'translateX(-50%)',
-                          width: 2, height: 16,
-                          background: '#FBBF24', borderRadius: 1,
-                          boxShadow: '0 0 4px rgba(251,191,36,0.8)',
-                        }} />
-                      );
-                    })()}
+                {/* Warning if any */}
+                {classificationReport.warning && (
+                  <div style={{ color: '#F59E0B', fontSize: 11.5, display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <AlertTriangle size={13} /> {classificationReport.warning}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: '#475569' }}>
-                    <span>Cold</span><span>25%</span><span>50%</span><span>75%</span><span>Hot</span>
-                  </div>
-                </div>
+                )}
 
                 {/* Node inspection panel */}
                 {selectedNode ? (
                   <div style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(71,85,105,0.6)', borderRadius: 8, overflow: 'hidden' }}>
-                    {/* Header row */}
-                    <div style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '7px 10px',
-                      borderBottom: '1px solid rgba(51,65,85,0.5)',
-                      background: 'rgba(255,255,255,0.03)',
-                    }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '7px 10px',
+                        borderBottom: '1px solid rgba(51,65,85,0.5)',
+                        background: 'rgba(255,255,255,0.03)',
+                      }}
+                    >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{
-                          width: 9, height: 9, borderRadius: '50%',
-                          background: selectedNodeColor ?? '#FBBF24',
-                          boxShadow: `0 0 5px ${selectedNodeColor ?? '#FBBF24'}`,
-                          flexShrink: 0,
-                        }} />
+                        <div
+                          style={{
+                            width: 9,
+                            height: 9,
+                            borderRadius: '50%',
+                            background: selectedNodeColor ?? '#FBBF24',
+                            boxShadow: `0 0 5px ${selectedNodeColor ?? '#FBBF24'}`,
+                            flexShrink: 0,
+                          }}
+                        />
                         <span style={{ fontWeight: 700, fontSize: 11.5, color: '#CBD5E1', fontFamily: 'monospace' }}>
                           Node #{selectedNode.id}
                         </span>
@@ -1118,8 +1262,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                         <X size={13} />
                       </button>
                     </div>
-                    {/* Coordinate rows */}
-                    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {([
                         { label: 'X', value: selectedNode.x, color: '#EF4444' },
                         { label: 'Y', value: selectedNode.y, color: '#10B981' },
@@ -1131,16 +1274,19 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                           <span style={{ fontSize: 10, color: '#475569' }}>m</span>
                         </div>
                       ))}
-                      {/* Temperature row */}
                       <div style={{ borderTop: '1px solid rgba(51,65,85,0.4)', paddingTop: 5, marginTop: 2 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span style={{ fontSize: 10.5, color: '#94A3B8' }}>Temperature</span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <div style={{
-                              width: 8, height: 8, borderRadius: '50%',
-                              background: selectedNodeColor ?? '#FBBF24',
-                              boxShadow: `0 0 4px ${selectedNodeColor ?? '#FBBF24'}`,
-                            }} />
+                            <div
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                background: selectedNodeColor ?? '#FBBF24',
+                                boxShadow: `0 0 4px ${selectedNodeColor ?? '#FBBF24'}`,
+                              }}
+                            />
                             <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700, color: '#F8FAFC' }}>
                               {selectedNode.T.toFixed(3)}
                             </span>
@@ -1151,15 +1297,96 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
                     </div>
                   </div>
                 ) : (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '10px 12px',
-                    background: 'rgba(255,255,255,0.025)',
-                    border: '1px dashed rgba(51,65,85,0.5)',
-                    borderRadius: 8, color: '#64748B', fontSize: 12,
-                  }}>
-                    <MousePointer size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
-                    <span>Click any point in the viewport to inspect nodal properties</span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 10px',
+                      background: 'rgba(255,255,255,0.02)',
+                      border: '1px dashed rgba(51,65,85,0.5)',
+                      borderRadius: 6,
+                      color: '#64748B',
+                      fontSize: 11.5,
+                    }}
+                  >
+                    <MousePointer size={13} style={{ flexShrink: 0, opacity: 0.6 }} />
+                    <span>Click any node in viewport to inspect properties</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button className="btn btn-outline btn-sm" onClick={downloadCSV} style={{ flex: 1 }}>
+                    <Download size={13} /> Export CSV
+                  </button>
+                  {stlResult && activeMode === 'csv' && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setActiveMode('stl_temp');
+                        setVisMode('temperature');
+                      }}
+                      style={{ flex: 1 }}
+                    >
+                      <Box size={13} /> Overlay STL
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STL Mesh Details Card */}
+          {stlResult && (activeMode === 'stl' || activeMode === 'stl_temp') && (
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">
+                  <Info size={16} /> STL Mesh Details
+                </span>
+                <span className="badge badge-blue">
+                  {activeMode === 'stl_temp' ? 'CAD + Thermal' : '3D CAD Solid'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="form-label" style={{ margin: 0 }}>Model Name</span>
+                  <span className="mono" style={{ color: 'var(--text-main)', fontWeight: 600 }}>
+                    {stlResult.name || 'unnamed_solid'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="form-label" style={{ margin: 0 }}>Triangles</span>
+                  <span style={{ fontWeight: 600, color: 'var(--primary-blue)' }}>
+                    {stlResult.triangle_count.toLocaleString()}
+                  </span>
+                </div>
+                <div>
+                  <span className="form-label">Dimensions (L × W × H)</span>
+                  <div className="mono" style={{ fontSize: 12, color: 'var(--text-main)' }}>
+                    {modelDimensions.dx.toFixed(3)}m × {modelDimensions.dy.toFixed(3)}m × {modelDimensions.dz.toFixed(3)}m
+                  </div>
+                </div>
+                <div>
+                  <span className="form-label">World Bounds</span>
+                  <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                    Min: [{stlResult.bounds.min.map((v) => v.toFixed(3)).join(', ')}]<br />
+                    Max: [{stlResult.bounds.max.map((v) => v.toFixed(3)).join(', ')}]
+                  </div>
+                </div>
+
+                {activeMode === 'stl' && (
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: 'var(--text-secondary)',
+                      background: 'rgba(59, 130, 246, 0.06)',
+                      border: '1px solid rgba(59, 130, 246, 0.2)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '8px 10px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    💡 <strong>Thermal Simulation:</strong> Standard STL geometry contains triangles without scalar temperatures. Click <strong>Map Temp on Cube STL</strong> above to view continuous thermal simulation mapping.
                   </div>
                 )}
               </div>
@@ -1171,7 +1398,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
         <div
           className="card"
           style={{
-            height: '640px',
+            height: '660px',
             padding: 0,
             overflow: 'hidden',
             position: 'relative',
@@ -1179,7 +1406,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             flexDirection: 'column',
           }}
         >
-          {/* Viewport Top Overlay Controls: Visualisation Selector & Reset View */}
+          {/* Viewport Top Overlay Controls */}
           <div
             style={{
               position: 'absolute',
@@ -1189,102 +1416,139 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
               display: 'flex',
               alignItems: 'center',
               gap: 8,
-              background: 'rgba(11, 18, 32, 0.85)',
+              background: 'rgba(11, 18, 32, 0.88)',
               padding: '6px 8px',
               borderRadius: 'var(--radius)',
               border: '1px solid var(--border)',
               backdropFilter: 'blur(8px)',
             }}
           >
-            {/* Visualisation Mode Selector */}
-            <div
-              style={{
-                display: 'inline-flex',
-                borderRadius: 'var(--radius-sm)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                padding: 2,
-                gap: 2,
-              }}
-            >
-              {/* Solid Mode Button */}
-              <button
-                className={`btn btn-sm ${visMode === 'solid' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                onClick={() => setVisMode('solid')}
-                disabled={activeMode !== 'stl'}
-                title="Solid CAD: professional blue shading with smooth curvature on rounded surfaces"
-              >
-                <Box size={13} /> Solid
-              </button>
-
-              {/* Faceted Mode Button */}
-              <button
-                className={`btn btn-sm ${visMode === 'faceted' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                onClick={() => setVisMode('faceted')}
-                disabled={activeMode !== 'stl'}
-                title="Faceted CAD: visibly distinguish triangle facets with flat shading and subtle edge lines"
-              >
-                <Layers size={13} /> Faceted
-              </button>
-
-              {/* Wireframe Mode Button */}
-              <button
-                className={`btn btn-sm ${visMode === 'wireframe' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                onClick={() => setVisMode('wireframe')}
-                disabled={activeMode !== 'stl'}
-                title="Wireframe: display triangle mesh edges without solid surface occlusion"
-              >
-                <Grid size={13} /> Wireframe
-              </button>
-
-              {/* Temperature Mode Button */}
-              <button
-                className={`btn btn-sm ${visMode === 'temperature' ? 'btn-primary' : 'btn-secondary'}`}
+            {/* Mode Selectors */}
+            {(activeMode === 'stl' || activeMode === 'stl_temp') && (
+              <div
                 style={{
-                  height: 28,
-                  padding: '0 10px',
-                  fontSize: 12,
-                  opacity: activeMode === 'csv' ? 1 : 0.55,
-                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  padding: 2,
+                  gap: 2,
                 }}
-                onClick={() => {
-                  if (activeMode === 'csv') {
-                    setVisMode('temperature');
-                    setNotice(null);
-                  } else if (csvResult) {
-                    setActiveMode('csv');
-                    setVisMode('temperature');
-                    setNotice(null);
-                  } else {
-                    setNotice(
-                      `Temperature mode is unavailable for this STL mesh ("${stlResult?.name || 'STL model'}"). Standard ASCII STL files define boundary geometry only — no scalar temperatures. Click "Sample Temperature CSV" on the left to load the colormap view.`
-                    );
-                  }
-                }}
-                title={
-                  activeMode === 'csv'
-                    ? 'Temperature: continuous scalar field colormap'
-                    : 'Temperature mode unavailable — no CSV data loaded'
-                }
               >
-                <Thermometer size={13} /> Temp
-              </button>
-            </div>
+                <button
+                  className={`btn btn-sm ${visMode === 'solid' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                  onClick={() => {
+                    setVisMode('solid');
+                    if (activeMode === 'stl_temp') setActiveMode('stl');
+                  }}
+                  title="Solid CAD: studio steel-blue shading with creased normals"
+                >
+                  <Box size={13} /> Solid
+                </button>
+                <button
+                  className={`btn btn-sm ${visMode === 'faceted' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                  onClick={() => {
+                    setVisMode('faceted');
+                    if (activeMode === 'stl_temp') setActiveMode('stl');
+                  }}
+                  title="Faceted CAD: visible triangular facet edges"
+                >
+                  <Layers size={13} /> Faceted
+                </button>
+                <button
+                  className={`btn btn-sm ${visMode === 'wireframe' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                  onClick={() => {
+                    setVisMode('wireframe');
+                    if (activeMode === 'stl_temp') setActiveMode('stl');
+                  }}
+                  title="Wireframe: triangle mesh outlines"
+                >
+                  <Grid size={13} /> Wireframe
+                </button>
+                <button
+                  className={`btn btn-sm ${visMode === 'temperature' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 10px', fontSize: 12 }}
+                  onClick={() => {
+                    if (csvResult && stlTemperatureMapping?.success) {
+                      setActiveMode('stl_temp');
+                      setVisMode('temperature');
+                    } else if (csvResult) {
+                      setActiveMode('csv');
+                      setVisMode('temperature');
+                    } else {
+                      setNotice('No compatible temperature CSV is loaded. Click "Map Temp on Cube STL" to load a mapped thermal model.');
+                    }
+                  }}
+                  title="Continuous temperature field mapped onto mesh"
+                >
+                  <Thermometer size={13} /> Temp
+                </button>
+              </div>
+            )}
+
+            {/* Display Style Selector for Temperature CSV mode */}
+            {activeMode === 'csv' && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  padding: 2,
+                  gap: 2,
+                }}
+              >
+                <button
+                  className={`btn btn-sm ${tempDisplayStyle === 'surface' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
+                  onClick={() => setTempDisplayStyle('surface')}
+                  title="Continuous temperature-colored solid surface"
+                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                >
+                  <Box size={12} /> Surface
+                </button>
+                <button
+                  className={`btn btn-sm ${tempDisplayStyle === 'surface_nodes' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
+                  onClick={() => setTempDisplayStyle('surface_nodes')}
+                  title="Continuous surface with discrete measurement node markers"
+                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                >
+                  <Layers size={12} /> Surface + Nodes
+                </button>
+                <button
+                  className={`btn btn-sm ${tempDisplayStyle === 'nodes_only' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
+                  onClick={() => setTempDisplayStyle('nodes_only')}
+                  title="Measured nodal temperature points only"
+                >
+                  <MousePointer size={12} /> Nodes
+                </button>
+                <button
+                  className={`btn btn-sm ${tempDisplayStyle === 'wireframe' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ height: 28, padding: '0 9px', fontSize: 11.5 }}
+                  onClick={() => setTempDisplayStyle('wireframe')}
+                  title="Structured cell grid wireframe"
+                  disabled={classificationReport?.type === 'unstructured_cloud'}
+                >
+                  <Grid size={12} /> Grid
+                </button>
+              </div>
+            )}
 
             {/* Reset View Button */}
             <button
               className="btn btn-secondary btn-sm"
               style={{ height: 28, padding: '0 10px', fontSize: 12 }}
               onClick={triggerResetView}
-              title="Reset camera orientation to standard Z-up isometric view and frame geometry"
+              title="Reset camera to standard Z-up isometric view"
             >
               <RotateCcw size={13} /> Reset View
             </button>
           </div>
 
-          {/* Coordinate System Legend / HUD Indicator (Bottom-Left) */}
+          {/* Coordinate System Legend / HUD Indicator */}
           <div
             style={{
               position: 'absolute',
@@ -1308,7 +1572,7 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             <span style={{ color: '#22C55E', fontWeight: 600 }}>Y</span>
             <span style={{ color: '#3B82F6', fontWeight: 600 }}>Z (Height)</span>
             <span style={{ color: 'var(--text-muted)', borderLeft: '1px solid var(--border)', paddingLeft: 6 }}>
-              Grid: XY Ground Plane
+              Grid: XY Ground
             </span>
           </div>
 
@@ -1318,26 +1582,38 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             style={{ background: cssVar('--viewport-bg'), width: '100%', height: '100%' }}
             onPointerMissed={() => setSelectedNode(null)}
           >
-
-            {/* Studio 3-Point Lighting tuned for CAD contrast and curved highlight definition */}
-            <ambientLight intensity={0.6} />
+            <ambientLight intensity={0.65} />
             <directionalLight position={[10, -10, 15]} intensity={0.9} />
             <directionalLight position={[-10, 10, 12]} intensity={0.45} />
             <directionalLight position={[0, 8, -10]} intensity={0.25} />
 
-            {/* STL Solid / Faceted / Wireframe Mesh */}
-            {stlResult && activeMode === 'stl' && (
+            {/* STL Mesh */}
+            {stlResult && (activeMode === 'stl' || activeMode === 'stl_temp') && (
               <STLMesh
                 result={stlResult}
                 mode={visMode}
+                mappedGeometry={activeMode === 'stl_temp' && visMode === 'temperature' ? stlTemperatureMapping?.geometry : null}
+                mappedWireGeometry={activeMode === 'stl_temp' && visMode === 'temperature' ? stlTemperatureMapping?.wireGeometry : null}
                 onBoundsCalculated={handleBoundsCalculated}
               />
             )}
 
-            {/* Scalar Temperature Point Cloud */}
+            {/* Scientific Temperature View (CSV Mode) */}
             {csvResult && activeMode === 'csv' && (
-              <TempPointCloud
+              <ScientificTemperatureView
                 data={csvResult}
+                displayStyle={tempDisplayStyle}
+                selectedId={selectedNode?.id ?? null}
+                onSelect={(n) => setSelectedNode(n)}
+                onBoundsCalculated={handleBoundsCalculated}
+              />
+            )}
+
+            {/* In STL Temp Mode, also optionally show CSV points floating if selected */}
+            {activeMode === 'stl_temp' && csvResult && (
+              <ScientificTemperatureView
+                data={csvResult}
+                displayStyle="nodes_only"
                 selectedId={selectedNode?.id ?? null}
                 onSelect={(n) => setSelectedNode(n)}
                 onBoundsCalculated={handleBoundsCalculated}
@@ -1360,13 +1636,12 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
 
             <WorldAxes length={Math.max(1, modelRadius * 1.15)} />
 
-            {/* Ground grid – XY plane at model base */}
+            {/* Ground grid – XY plane beneath model */}
             <gridHelper
               args={[gridSize, 20, '#1A2848', '#0F1830']}
               rotation={[Math.PI / 2, 0, 0]}
               position={[0, 0, groundZ]}
             />
-
 
             <GizmoHelper alignment="bottom-right" margin={[70, 70]}>
               <GizmoViewport
@@ -1376,13 +1651,19 @@ export default function GeometryViewer({ backendUp }: { backendUp: boolean }) {
             </GizmoHelper>
           </Canvas>
 
-          {/* Floating Temperature Legend (only when CSV is active) */}
-          {csvResult && activeMode === 'csv' && (
+          {/* Floating Temperature Legend (when CSV or Hybrid mode is active) */}
+          {csvResult && (activeMode === 'csv' || (activeMode === 'stl_temp' && visMode === 'temperature')) && (
             <TempLegend
               tMin={csvResult.T_min}
               tMax={csvResult.T_max}
               selectedT={selectedNode?.T ?? null}
               nodeCount={csvResult.node_count}
+              classificationTitle={
+                activeMode === 'stl_temp'
+                  ? `STL Mesh ("${stlResult?.name}") + Mapped Field`
+                  : classificationReport?.title || 'Temperature Field'
+              }
+              badgeColor={classificationReport?.badgeColor || '#3B82F6'}
             />
           )}
 
