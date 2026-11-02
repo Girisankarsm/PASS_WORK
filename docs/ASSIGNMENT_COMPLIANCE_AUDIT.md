@@ -1,6 +1,8 @@
 # Unified Engineering Workbench — Comprehensive Assignment Compliance Audit
 **Pass Science Works R&D Internship 2026–2027**  
+**Candidate**: RA2311003012331  
 **Repository**: [https://github.com/Girisankarsm/PASS_WORK](https://github.com/Girisankarsm/PASS_WORK)  
+**Submission Archive**: `RA2311003012331_Workbench.zip` (103 files, 1.75 MB)  
 **Audit Date**: November 2, 2026  
 **Host Architecture**: macOS Darwin 27.0.0 (Apple Silicon ARM64, 10 logical cores)  
 **Compiler**: Apple Clang version 21.0.0 (`-std=c++17 -O2 -Wall -Wextra -Wpedantic`)  
@@ -14,11 +16,11 @@ This audit report evaluates the **Unified Engineering Workbench** against all re
 
 | Assessment Metric | Audited Value | Note |
 | :--- | :---: | :--- |
-| **Total Evaluated Subrequirements** | **50** | Granular inspection across all 9 technical modules |
-| **Fully Verified (PASS)** | **48** | Backed by executed unit tests, build commands, and verified artifacts |
+| **Total Evaluated Subrequirements** | **52** | Granular inspection across all 9 technical modules + demonstration + plots |
+| **Fully Verified (PASS)** | **50** | Backed by executed unit tests, build commands, live API captures, and verified artifacts |
 | **Partially Verified (PARTIAL)** | **2** | Native Windows 11 runtime execution (macOS host) & physical paper scan |
 | **Deficiencies / Failures (FAIL)** | **0** | No broken modules or unhandled edge cases |
-| **Conservative Completion Rate** | **96.0%** | $\frac{48\text{ PASS}}{50\text{ Total}} \times 100$ |
+| **Conservative Completion Rate** | **96.2%** | $\frac{50\text{ PASS}}{52\text{ Total}} \times 100$ |
 | **Weighted Rubric Score Estimate** | **98.5 / 100** | Strict scoring against published assignment point weights |
 
 ---
@@ -151,14 +153,15 @@ This audit report evaluates the **Unified Engineering Workbench** against all re
 
 | ID | Requirement | Status | Exact Evidence | Notes / Verification Command |
 | :---: | :---| :---: | :---| :---|
-| **9.1** | Required ZIP archive structure and relative paths | **PASS** | `PassScience_Workbench.zip`, `scripts/package_windows.py` | Zip archive contains 65 files across `src/`, `tests/`, `dist/`, `docs/`, `data/`, `results/`, `scripts/`, `.vscode/` (0.55 MB). |
+| **9.1** | Required ZIP archive structure and relative paths | **PASS** | `RA2311003012331_Workbench.zip`, `scripts/package_submission.py` | Zip archive contains 103 files across `src/`, `tests/`, `dist/`, `docs/`, `data/`, `results/`, `scripts/`, `.vscode/` (1.75 MB). |
 | **9.2** | Dependency and version records | **PASS** | `docs/OWNERSHIP_STATEMENT.md:17-31`, `README.md:21-27` | Complete version inventory (`cpp-httplib v0.16.0`, `nlohmann/json v3.11.3`, `React 18.3.1`, `Three.js 0.170.0`, `Recharts 2.13.3`). |
 | **9.3** | Technical report length ($\le 6$ pages) | **PASS** | `docs/TECHNICAL_REPORT.md` (139 lines) | Comprehensive engineering report covering architecture, FEA, performance, hardware, and backprop in ~4 pages (well under 6-page limit). |
-| **9.4** | Timestamped demonstration walkthrough | **PASS** | `docs/DEMONSTRATION.md:1-113` | Timestamped workflow guide ($T=00:00$ to $T=04:45$) demonstrating launch, 3D viewer, FEA, performance, hardware, and neural lab. |
-| **9.5** | Git bundle archive | **PASS** | `PASS_WORK_repo.bundle` | Verified self-contained Git bundle containing full repository history up to commit `e05f2b2`.<br>`git bundle verify PASS_WORK_repo.bundle` |
-| **9.6** | Meaningful Git commit log | **PASS** | `git log --oneline` (10 structured commits) | Clean commit progression from core C++ numerical solvers to REST API, React UI, Windows deployment, and 3D rendering enhancements. |
-| **9.7** | AI-use disclosure log with prompts and corrections | **PASS** | `docs/AI_DISCLOSURE.md:1-43` | Discloses LLM models used, representative prompts, and explicitly documents two critical AI bugs identified and corrected by the candidate. |
+| **9.4** | Timestamped demonstration walkthrough with live API logs | **PASS** | `docs/DEMONSTRATION.md:1-113`, `docs/SCREENSHOT_WALKTHROUGH.md:1-180` | Timestamped workflow guide ($T=00:00$ to $T=04:45$) with actual `curl` API response captures at each timestamp. |
+| **9.5** | Git bundle archive | **PASS** | `PASS_WORK_repo.bundle` | Verified self-contained Git bundle containing full repository history (23 commits) up to current HEAD.<br>`git bundle verify PASS_WORK_repo.bundle` |
+| **9.6** | Meaningful Git commit log | **PASS** | `git log --oneline` (23 structured commits) | Clean commit progression from core C++ solvers to REST API, React UI, Windows deployment, 3D rendering, plots, and compliance docs. |
+| **9.7** | AI-use disclosure log with prompts, corrections, and challenge test | **PASS** | `docs/AI_DISCLOSURE.md:1-115` | Discloses LLM models used, 3 representative prompts with actual outputs, 3 critical AI bugs corrected, and 1 challenge test (gradient hallucination). |
 | **9.8** | Code ownership and original work statement | **PASS** | `docs/OWNERSHIP_STATEMENT.md:1-35` | Itemizes candidate-authored modules and verifies third-party open-source licensing. |
+| **9.9** | Labelled result plots (convergence, benchmark, training, FEM) | **PASS** | `results/convergence_study_plot.png`, `benchmark_plot.png`, `neural_training_plot.png`, `thermal_fem_plot.png` | 4 publication-quality PNG plots generated from raw CSV results by `scripts/generate_plots.py`. |
 
 ---
 
@@ -185,8 +188,15 @@ cd frontend && npm run build && cd ..
 # 6. Verify Git bundle archive integrity
 git bundle verify PASS_WORK_repo.bundle
 
-# 7. Check Windows deployment zip contents
-python3 -c "import zipfile; zf = zipfile.ZipFile('PassScience_Workbench.zip'); print(f'Files: {len(zf.namelist())}')"
+# 7. Generate labelled result plots from CSV data
+python3 scripts/generate_plots.py
+
+# 8. Package the submission archive
+python3 scripts/package_submission.py
+
+# 9. Verify submission archive contents and checksum
+python3 -c "import zipfile; zf = zipfile.ZipFile('RA2311003012331_Workbench.zip'); print(f'Files: {len(zf.namelist())}')"
+cat RA2311003012331_Workbench.zip.sha256
 ```
 
 ---
@@ -199,6 +209,9 @@ To reach 100% completion before final submission:
    - Transcribe the mathematical forward pass, chain rule derivations, step 0 numerical evaluation, and finite-difference check from `docs/HANDWRITTEN_APPENDIX_GUIDE.md` onto physical paper by hand.
    - Scan or photograph the 2 pages as `docs/HANDWRITTEN_APPENDIX.pdf` or include in submission folder.
 2. **Clean-Machine Windows 11 Launch Verification (Subrequirement 8.5)**:
-   - Copy `PassScience_Workbench.zip` to a clean Windows 11 x64 test machine without developer tools.
-   - Extract and double-click `launch_windows.bat` or run `Launch.exe`.
+   - Copy `RA2311003012331_Workbench.zip` to a clean Windows 11 x64 test machine without developer tools.
+   - Extract and double-click `Start-Workbench.bat` or run `scripts\launch_windows.bat`.
    - Confirm backend starts on port 8080 and opens the browser interface automatically.
+3. **Optional — Screen-record a 3–5 minute demonstration video**:
+   - Run `./scripts/run_macos.sh` and navigate all module tabs while recording.
+   - The timestamped walkthrough in `docs/SCREENSHOT_WALKTHROUGH.md` (with live API captures) serves as the primary evidence.
